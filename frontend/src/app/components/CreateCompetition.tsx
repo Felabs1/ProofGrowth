@@ -1,77 +1,166 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 interface CreateCompetitionProps {
   onNavigate: (page: string, id?: string) => void;
 }
 
-const defaultRules = [
-  { event: 'signup', points: 1 },
-  { event: 'onboarding_completed', points: 5 },
-  { event: 'core_action_completed', points: 10 },
-  { event: 'returned_after_24h', points: 20 },
-  { event: 'paid_conversion', points: 50 },
+type CompType = 'payment' | 'contract' | 'adoption';
+type WinnersMode = '1' | '3' | '5' | 'custom';
+
+const TYPES: {
+  id: CompType;
+  title: string;
+  blurb: string;
+  icon: string;
+  actionLabel: string;
+  defaultPoints: number;
+}[] = [
+  {
+    id: 'payment',
+    title: 'Payments',
+    blurb: 'Reward people who send the most USDC or asset transfers.',
+    icon: '⇄',
+    actionLabel: 'Each transfer',
+    defaultPoints: 1,
+  },
+  {
+    id: 'contract',
+    title: 'Contract usage',
+    blurb: 'Reward people who use your app the most.',
+    icon: '◎',
+    actionLabel: 'Each app interaction',
+    defaultPoints: 5,
+  },
+  {
+    id: 'adoption',
+    title: 'Adoption',
+    blurb: 'Reward bringing the most new wallets to your app.',
+    icon: '✦',
+    actionLabel: 'Each new wallet',
+    defaultPoints: 10,
+  },
 ];
+
+const ASSETS = ['USDC', 'XLM', 'EURC'];
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  fontSize: 13,
+  color: 'var(--pg-text-sec)',
+  marginBottom: 8,
+  fontFamily: "'JetBrains Mono', monospace",
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  fontWeight: 400,
+};
+
+const hintStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: 'var(--pg-text-dim)',
+  marginTop: 6,
+  lineHeight: 1.5,
+};
+
+const emptyForm = {
+  name: '',
+  description: '',
+  startDate: '',
+  endDate: '',
+  type: 'payment' as CompType,
+  asset: 'USDC',
+  contractAddress: '',
+  basePoints: 1,
+  firstBonus: true,
+  firstBonusPoints: 5,
+  repeatBonus: false,
+  repeatBonusPoints: 2,
+  winnersMode: '3' as WinnersMode,
+  customSplit: [50, 30, 20] as number[],
+  prizePool: '',
+  escrowConfirmed: false,
+};
 
 export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({
-    title: '',
-    description: '',
-    category: 'SaaS',
-    prizePool: '',
-    startDate: '',
-    endDate: '',
-    winners: '3',
-  });
-  const [rules, setRules] = useState(defaultRules);
-  const [newRule, setNewRule] = useState({ event: '', points: '' });
+  const [form, setForm] = useState(emptyForm);
   const [submitted, setSubmitted] = useState(false);
 
-  const update = (key: string, val: string) => setForm(f => ({ ...f, [key]: val }));
+  const update = <K extends keyof typeof emptyForm>(
+    key: K,
+    val: (typeof emptyForm)[K],
+  ) => setForm((f) => ({ ...f, [key]: val }));
 
-  const addRule = () => {
-    if (!newRule.event || !newRule.points) return;
-    setRules(r => [...r, { event: newRule.event, points: parseInt(newRule.points) }]);
-    setNewRule({ event: '', points: '' });
+  const selectType = (t: CompType) => {
+    const meta = TYPES.find((x) => x.id === t)!;
+    setForm((f) => ({ ...f, type: t, basePoints: meta.defaultPoints }));
   };
 
-  const removeRule = (i: number) => setRules(r => r.filter((_, idx) => idx !== i));
+  const activeType = TYPES.find((t) => t.id === form.type)!;
+  const splitTotal = form.customSplit.reduce((a, b) => a + (b || 0), 0);
+
+  const step1Valid = form.name.trim() && form.startDate && form.endDate;
+  const step2Valid =
+    form.type === 'payment' ? true : form.contractAddress.trim().length > 3;
+  const winnersValid =
+    form.winnersMode !== 'custom' || splitTotal === 100;
+  const step3Valid =
+    Number(form.prizePool) > 0 && form.escrowConfirmed && winnersValid;
+
+  const config = useMemo(
+    () => ({
+      name: form.name,
+      description: form.description,
+      schedule: { start: form.startDate, end: form.endDate },
+      type: form.type,
+      target:
+        form.type === 'payment'
+          ? { asset: form.asset }
+          : { contract: form.contractAddress },
+      scoring: {
+        base: { action: activeType.actionLabel, points: form.basePoints },
+        bonuses: [
+          ...(form.firstBonus
+            ? [{ kind: 'first_interaction', points: form.firstBonusPoints }]
+            : []),
+          ...(form.repeatBonus
+            ? [{ kind: 'repeat_interaction', points: form.repeatBonusPoints }]
+            : []),
+        ],
+      },
+      winners:
+        form.winnersMode === 'custom'
+          ? { split: form.customSplit }
+          : { top: Number(form.winnersMode) },
+      prize: { asset: 'USDC', amount: Number(form.prizePool), escrow: 'soroban' },
+      tracking: { mode: 'onchain', network: 'stellar', sdkRequired: false },
+    }),
+    [form, activeType],
+  );
 
   if (submitted) {
-    return (
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '120px 2rem 60px', textAlign: 'center' }}>
-        <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(16,185,129,0.15)', border: '2px solid var(--pg-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, margin: '0 auto 2rem' }}>✓</div>
-        <h2 style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '1rem' }}>Competition Created!</h2>
-        <p style={{ color: 'var(--pg-text-sec)', lineHeight: 1.7, marginBottom: '2rem' }}>
-          Your competition <strong style={{ color: 'var(--pg-text)' }}>{form.title || 'Untitled'}</strong> has been deployed to Soroban and is now live. Prize pool of <strong style={{ color: 'var(--pg-accent-bright)' }}>{form.prizePool || '0'} USDC</strong> is in escrow.
-        </p>
-        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-          <button className="pg-btn-primary" style={{ padding: '12px 24px', fontSize: 14 }} onClick={() => onNavigate('browse')}>
-            View Competitions
-          </button>
-          <button className="pg-btn-secondary" style={{ padding: '12px 24px', fontSize: 14 }} onClick={() => { setSubmitted(false); setStep(1); setForm({ title: '', description: '', category: 'SaaS', prizePool: '', startDate: '', endDate: '', winners: '3' }); setRules(defaultRules); }}>
-            Create Another
-          </button>
-        </div>
-      </div>
-    );
+    return <LaunchSuccess form={form} config={config} onNavigate={onNavigate} onReset={() => { setSubmitted(false); setStep(1); setForm(emptyForm); }} />;
   }
 
-  const steps = ['Competition Info', 'Scoring Rules', 'Prize & Deploy'];
+  const steps = ['Basics', 'What to track', 'Prizes & launch'];
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '100px 2rem 60px' }}>
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '100px 2rem 60px' }}>
       <button onClick={() => onNavigate('browse')} style={{ background: 'none', border: 'none', color: 'var(--pg-text-sec)', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 12, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: 6 }}>
         ← Back
       </button>
 
-      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--pg-accent-bright)', textTransform: 'uppercase', letterSpacing: '0.12em', display: 'block', marginBottom: '1rem' }}>
-        // CREATE COMPETITION
-      </span>
-      <h1 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.4rem)', fontWeight: 700, letterSpacing: '-0.02em', marginBottom: '2rem' }}>Launch a Growth Competition</h1>
+      <h1 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.4rem)', fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 8 }}>Launch a growth competition</h1>
+      <p style={{ color: 'var(--pg-text-sec)', fontSize: 15, marginBottom: '1.25rem', lineHeight: 1.6 }}>
+        Reward real on-chain activity. Set it up in under two minutes — no code, no integrations.
+      </p>
+
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'var(--pg-accent-glow)', border: '1px solid var(--pg-border)', borderRadius: 999, padding: '6px 14px', marginBottom: '2.5rem' }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--pg-green)', boxShadow: '0 0 8px var(--pg-green)' }} className="pg-pulse-dot" />
+        <span style={{ fontSize: 12, color: 'var(--pg-text-sec)', fontFamily: "'JetBrains Mono', monospace" }}>Automatic on-chain tracking · Stellar only · No SDK</span>
+      </div>
 
       {/* Step indicator */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: '3rem' }}>
+      <div style={{ display: 'flex', gap: 0, marginBottom: '2.5rem' }}>
         {steps.map((s, i) => (
           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -94,156 +183,290 @@ export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
         ))}
       </div>
 
-      {/* Step 1: Info */}
+      {/* Step 1: Basics */}
       {step === 1 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: 13, color: 'var(--pg-text-sec)', marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 400 }}>Competition Title *</label>
-            <input className="pg-input" placeholder="e.g. Acquire 20 Active Users for SaaS Tool" value={form.title} onChange={e => update('title', e.target.value)} />
+            <label style={labelStyle}>Competition name *</label>
+            <input className="pg-input" placeholder="e.g. Summer USDC Payment Sprint" value={form.name} onChange={(e) => update('name', e.target.value)} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 13, color: 'var(--pg-text-sec)', marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 400 }}>Description *</label>
-            <textarea className="pg-textarea" placeholder="Describe what participants need to do and what success looks like..." value={form.description} onChange={e => update('description', e.target.value)} style={{ minHeight: 100 }} />
+            <label style={labelStyle}>What are you rewarding?</label>
+            <textarea className="pg-textarea" placeholder="One line on the behavior you want to drive — e.g. “Send the most USDC payments to merchants.”" value={form.description} onChange={(e) => update('description', e.target.value)} style={{ minHeight: 80 }} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div>
-              <label style={{ display: 'block', fontSize: 13, color: 'var(--pg-text-sec)', marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 400 }}>Category</label>
-              <select className="pg-select" value={form.category} onChange={e => update('category', e.target.value)}>
-                {['SaaS', 'Fintech', 'B2B', 'Mobile', 'E-commerce', 'Web3', 'Consumer', 'Other'].map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+              <label style={labelStyle}>Starts *</label>
+              <input className="pg-input" type="date" value={form.startDate} onChange={(e) => update('startDate', e.target.value)} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, color: 'var(--pg-text-sec)', marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 400 }}>Number of Winners</label>
-              <select className="pg-select" value={form.winners} onChange={e => update('winners', e.target.value)}>
-                {['1', '2', '3', '5', '10'].map(n => <option key={n} value={n}>Top {n}</option>)}
-              </select>
+              <label style={labelStyle}>Ends *</label>
+              <input className="pg-input" type="date" value={form.endDate} onChange={(e) => update('endDate', e.target.value)} />
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, color: 'var(--pg-text-sec)', marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 400 }}>Start Date</label>
-              <input className="pg-input" type="date" value={form.startDate} onChange={e => update('startDate', e.target.value)} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, color: 'var(--pg-text-sec)', marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 400 }}>End Date</label>
-              <input className="pg-input" type="date" value={form.endDate} onChange={e => update('endDate', e.target.value)} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-            <button className="pg-btn-primary" style={{ padding: '12px 28px', fontSize: 14 }} onClick={() => setStep(2)}>
-              Next: Scoring Rules →
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+            <button className="pg-btn-primary" style={{ padding: '12px 28px', fontSize: 14, opacity: step1Valid ? 1 : 0.5 }} disabled={!step1Valid} onClick={() => setStep(2)}>
+              Continue →
             </button>
           </div>
         </div>
       )}
 
-      {/* Step 2: Scoring */}
+      {/* Step 2: What to track */}
       {step === 2 && (
-        <div>
-          <p style={{ fontSize: 14, color: 'var(--pg-text-sec)', marginBottom: '1.5rem', lineHeight: 1.6 }}>
-            Define what user actions count and how many points they're worth. Only verified events will contribute to scores.
-          </p>
-
-          <div style={{ background: 'var(--pg-mid)', border: '1px solid var(--pg-border)', borderRadius: 14, overflow: 'hidden', marginBottom: '1.5rem' }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--pg-border-dim)', background: 'var(--pg-surface)', display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--pg-text-sec)' }}>SCORING RULES</span>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--pg-text-dim)' }}>{rules.length} events defined</span>
-            </div>
-            {rules.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid var(--pg-border-dim)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--pg-accent-bright)' }} />
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: 'var(--pg-text-sec)' }}>{r.event}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: 'var(--pg-accent-bright)' }}>+{r.points} pts</span>
-                  <button onClick={() => removeRule(i)} style={{ background: 'none', border: 'none', color: 'var(--pg-text-dim)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
-                </div>
-              </div>
-            ))}
-            <div style={{ padding: '12px 20px', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-              <input className="pg-input" style={{ flex: 2 }} placeholder="event_name (e.g. feature_used)" value={newRule.event} onChange={e => setNewRule(r => ({ ...r, event: e.target.value }))} onKeyDown={e => e.key === 'Enter' && addRule()} />
-              <input className="pg-input" style={{ flex: 1 }} placeholder="Points" type="number" min="1" value={newRule.points} onChange={e => setNewRule(r => ({ ...r, points: e.target.value }))} onKeyDown={e => e.key === 'Enter' && addRule()} />
-              <button className="pg-btn-secondary" style={{ padding: '10px 16px', fontSize: 13, whiteSpace: 'nowrap' }} onClick={addRule}>+ Add Rule</button>
-            </div>
-          </div>
-
-          <div style={{ background: 'rgba(37,99,235,0.08)', border: '1px solid var(--pg-border)', borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ color: 'var(--pg-accent-bright)', marginTop: 2 }}>ℹ</span>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>How scoring works</div>
-                <p style={{ fontSize: 12, color: 'var(--pg-text-sec)', lineHeight: 1.6 }}>
-                  Events are emitted by your app via the ProofGrowth SDK. Each verified event adds points to the participant who referred that user. The verification engine deduplicates and validates events before scoring.
-                </p>
-              </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+          <div>
+            <label style={labelStyle}>What counts as growth?</label>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {TYPES.map((t) => {
+                const active = form.type === t.id;
+                return (
+                  <button key={t.id} onClick={() => selectType(t.id)} style={{
+                    textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14,
+                    padding: '14px 16px', borderRadius: 12,
+                    background: active ? 'var(--pg-accent-glow)' : 'var(--pg-mid)',
+                    border: `1px solid ${active ? 'var(--pg-accent-bright)' : 'var(--pg-border-dim)'}`,
+                    transition: 'all 0.18s',
+                  }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, background: active ? 'var(--pg-accent)' : 'var(--pg-surface)', color: active ? '#fff' : 'var(--pg-accent-bright)' }}>{t.icon}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--pg-text)' }}>{t.title}</div>
+                      <div style={{ fontSize: 13, color: 'var(--pg-text-sec)', lineHeight: 1.4 }}>{t.blurb}</div>
+                    </div>
+                    <div style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0, border: `2px solid ${active ? 'var(--pg-accent-bright)' : 'var(--pg-text-dim)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {active && <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--pg-accent-bright)' }} />}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem' }}>
+          {/* Conditional target */}
+          <div>
+            {form.type === 'payment' ? (
+              <>
+                <label style={labelStyle}>Which asset?</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {ASSETS.map((a) => (
+                    <button key={a} onClick={() => update('asset', a)} className="pg-mono" style={{
+                      padding: '10px 18px', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                      background: form.asset === a ? 'var(--pg-accent)' : 'var(--pg-surface)',
+                      color: form.asset === a ? '#fff' : 'var(--pg-text-sec)',
+                      border: `1px solid ${form.asset === a ? 'var(--pg-accent-bright)' : 'var(--pg-border-dim)'}`,
+                    }}>{a}</button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <label style={labelStyle}>Your app address</label>
+                <input className="pg-input pg-mono" placeholder="C... (Stellar contract address)" value={form.contractAddress} onChange={(e) => update('contractAddress', e.target.value)} />
+                <p style={hintStyle}>Paste the Soroban contract address for your app. We watch it automatically — no setup needed.</p>
+              </>
+            )}
+          </div>
+
+          {/* Scoring */}
+          <div>
+            <label style={labelStyle}>Scoring</label>
+            <div style={{ background: 'var(--pg-mid)', border: '1px solid var(--pg-border)', borderRadius: 12, padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <PointRow label={activeType.actionLabel} sub="Base points per action" value={form.basePoints} onChange={(v) => update('basePoints', v)} />
+              <div style={{ height: 1, background: 'var(--pg-border-dim)' }} />
+              <ToggleRow label="First-time bonus" sub="Extra points the first time a wallet acts" enabled={form.firstBonus} onToggle={() => update('firstBonus', !form.firstBonus)} value={form.firstBonusPoints} onChange={(v) => update('firstBonusPoints', v)} />
+              <ToggleRow label="Repeat bonus" sub="Extra points for coming back again" enabled={form.repeatBonus} onToggle={() => update('repeatBonus', !form.repeatBonus)} value={form.repeatBonusPoints} onChange={(v) => update('repeatBonusPoints', v)} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button className="pg-btn-secondary" style={{ padding: '12px 28px', fontSize: 14 }} onClick={() => setStep(1)}>← Back</button>
-            <button className="pg-btn-primary" style={{ padding: '12px 28px', fontSize: 14 }} onClick={() => setStep(3)}>Next: Prize & Deploy →</button>
+            <button className="pg-btn-primary" style={{ padding: '12px 28px', fontSize: 14, opacity: step2Valid ? 1 : 0.5 }} disabled={!step2Valid} onClick={() => setStep(3)}>Continue →</button>
           </div>
         </div>
       )}
 
-      {/* Step 3: Prize & Deploy */}
+      {/* Step 3: Prizes & launch */}
       {step === 3 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: 13, color: 'var(--pg-text-sec)', marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 400 }}>Prize Pool (USDC) *</label>
-            <input className="pg-input" type="number" min="1" placeholder="e.g. 500" value={form.prizePool} onChange={e => update('prizePool', e.target.value)} />
-            <p style={{ fontSize: 12, color: 'var(--pg-text-dim)', marginTop: 6 }}>Funds will be locked in a Soroban escrow contract until the competition ends</p>
-          </div>
-
-          {/* Summary */}
-          <div style={{ background: 'var(--pg-mid)', border: '1px solid var(--pg-border)', borderRadius: 14, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--pg-border-dim)', background: 'var(--pg-surface)' }}>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--pg-text-sec)' }}>COMPETITION SUMMARY</span>
-            </div>
-            <div style={{ padding: '1.25rem' }}>
-              {[
-                { label: 'Title', value: form.title || '—' },
-                { label: 'Category', value: form.category },
-                { label: 'Prize Pool', value: form.prizePool ? `${form.prizePool} USDC` : '—' },
-                { label: 'Duration', value: form.startDate && form.endDate ? `${form.startDate} → ${form.endDate}` : '—' },
-                { label: 'Winners', value: `Top ${form.winners}` },
-                { label: 'Scoring Events', value: `${rules.length} rules defined` },
-              ].map((row, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: i < 5 ? '1px solid var(--pg-border-dim)' : 'none' }}>
-                  <span style={{ fontSize: 13, color: 'var(--pg-text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>{row.label}</span>
-                  <span style={{ fontSize: 13, color: 'var(--pg-text)', fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, maxWidth: '60%', textAlign: 'right' }}>{row.value}</span>
-                </div>
+            <label style={labelStyle}>Who wins?</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {(['1', '3', '5', 'custom'] as WinnersMode[]).map((m) => (
+                <button key={m} onClick={() => update('winnersMode', m)} style={{
+                  padding: '10px 18px', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                  background: form.winnersMode === m ? 'var(--pg-accent)' : 'var(--pg-surface)',
+                  color: form.winnersMode === m ? '#fff' : 'var(--pg-text-sec)',
+                  border: `1px solid ${form.winnersMode === m ? 'var(--pg-accent-bright)' : 'var(--pg-border-dim)'}`,
+                }}>{m === 'custom' ? 'Custom split' : `Top ${m}`}</button>
               ))}
             </div>
+            {form.winnersMode === 'custom' && (
+              <div style={{ marginTop: '1rem', background: 'var(--pg-mid)', border: '1px solid var(--pg-border-dim)', borderRadius: 12, padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {form.customSplit.map((pct, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 13, color: 'var(--pg-text-sec)', width: 80, fontFamily: "'JetBrains Mono', monospace" }}>{ordinal(i + 1)} place</span>
+                    <input className="pg-input" type="number" min="0" max="100" value={pct} onChange={(e) => {
+                      const next = [...form.customSplit];
+                      next[i] = Number(e.target.value);
+                      update('customSplit', next);
+                    }} style={{ width: 90 }} />
+                    <span style={{ fontSize: 13, color: 'var(--pg-text-dim)' }}>%</span>
+                    {form.customSplit.length > 1 && (
+                      <button onClick={() => update('customSplit', form.customSplit.filter((_, idx) => idx !== i))} style={{ background: 'none', border: 'none', color: 'var(--pg-text-dim)', cursor: 'pointer', fontSize: 16, marginLeft: 'auto' }}>×</button>
+                    )}
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                  <button className="pg-btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => update('customSplit', [...form.customSplit, 0])}>+ Add place</button>
+                  <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: splitTotal === 100 ? 'var(--pg-green)' : 'var(--pg-amber)' }}>
+                    {splitTotal}% allocated {splitTotal === 100 ? '✓' : '(must equal 100%)'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Blockchain info */}
-          <div style={{ background: 'var(--pg-mid)', border: '1px solid var(--pg-border)', borderRadius: 14, padding: '1.25rem' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: '0.75rem' }}>Deployment Details</div>
+          <div>
+            <label style={labelStyle}>Prize pool *</label>
+            <div style={{ position: 'relative' }}>
+              <input className="pg-input" type="number" min="1" placeholder="500" value={form.prizePool} onChange={(e) => update('prizePool', e.target.value)} style={{ paddingRight: 64 }} />
+              <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: 'var(--pg-text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>USDC</span>
+            </div>
+          </div>
+
+          {/* Escrow confirm */}
+          <button onClick={() => update('escrowConfirmed', !form.escrowConfirmed)} style={{
+            textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 12,
+            padding: '14px 16px', borderRadius: 12,
+            background: form.escrowConfirmed ? 'var(--pg-accent-glow)' : 'var(--pg-mid)',
+            border: `1px solid ${form.escrowConfirmed ? 'var(--pg-accent-bright)' : 'var(--pg-border-dim)'}`,
+            transition: 'all 0.18s',
+          }}>
+            <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, marginTop: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: form.escrowConfirmed ? 'var(--pg-accent)' : 'transparent', border: `2px solid ${form.escrowConfirmed ? 'var(--pg-accent-bright)' : 'var(--pg-text-dim)'}`, color: '#fff', fontSize: 13 }}>
+              {form.escrowConfirmed ? '✓' : ''}
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--pg-text)' }}>Lock {form.prizePool || '0'} USDC in escrow</div>
+              <div style={{ fontSize: 13, color: 'var(--pg-text-sec)', lineHeight: 1.5 }}>Held safely on Stellar and paid out automatically to winners when the competition ends.</div>
+            </div>
+          </button>
+
+          {/* Recap */}
+          <div style={{ background: 'var(--pg-mid)', border: '1px solid var(--pg-border)', borderRadius: 12, padding: '1.25rem' }}>
             {[
-              { label: 'Network', value: 'Stellar Mainnet' },
-              { label: 'Contract', value: 'Soroban Escrow' },
-              { label: 'Token', value: 'USDC (Centre Consortium)' },
-              { label: 'Oracle', value: 'ProofGrowth Verification Oracle' },
-            ].map((d, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < 3 ? '1px solid var(--pg-border-dim)' : 'none' }}>
-                <span style={{ fontSize: 12, color: 'var(--pg-text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>{d.label}</span>
-                <span style={{ fontSize: 12, color: 'var(--pg-accent-bright)', fontFamily: "'JetBrains Mono', monospace" }}>{d.value}</span>
+              { label: 'Name', value: form.name || '—' },
+              { label: 'Tracking', value: activeType.title },
+              { label: 'Target', value: form.type === 'payment' ? form.asset : truncate(form.contractAddress) || '—' },
+              { label: 'Base', value: `${activeType.actionLabel} = ${form.basePoints} pts` },
+              { label: 'Winners', value: form.winnersMode === 'custom' ? `Custom (${form.customSplit.length})` : `Top ${form.winnersMode}` },
+              { label: 'Prize', value: form.prizePool ? `${form.prizePool} USDC` : '—' },
+            ].map((row, i, arr) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--pg-border-dim)' : 'none' }}>
+                <span style={{ fontSize: 13, color: 'var(--pg-text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>{row.label}</span>
+                <span style={{ fontSize: 13, color: 'var(--pg-text)', fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, maxWidth: '60%', textAlign: 'right' }}>{row.value}</span>
               </div>
             ))}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem' }}>
+          {!winnersValid && <p style={{ ...hintStyle, color: 'var(--pg-amber)' }}>Custom split must add up to 100%.</p>}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button className="pg-btn-secondary" style={{ padding: '12px 28px', fontSize: 14 }} onClick={() => setStep(2)}>← Back</button>
-            <button className="pg-btn-primary" style={{ padding: '14px 36px', fontSize: 15, fontWeight: 700 }} onClick={() => setSubmitted(true)}>
-              Deploy to Soroban & Fund Escrow
+            <button className="pg-btn-primary" style={{ padding: '14px 36px', fontSize: 15, fontWeight: 700, opacity: step3Valid ? 1 : 0.5 }} disabled={!step3Valid} onClick={() => setSubmitted(true)}>
+              Launch competition
             </button>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+function PointRow({ label, sub, value, onChange }: { label: string; sub: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--pg-text)' }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--pg-text-dim)' }}>{sub}</div>
+      </div>
+      <input className="pg-input" type="number" min="0" value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ width: 80 }} />
+      <span style={{ fontSize: 13, color: 'var(--pg-text-dim)', width: 24 }}>pts</span>
+    </div>
+  );
+}
+
+function ToggleRow({ label, sub, enabled, onToggle, value, onChange }: { label: string; sub: string; enabled: boolean; onToggle: () => void; value: number; onChange: (v: number) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <button onClick={onToggle} style={{ width: 40, height: 22, borderRadius: 999, flexShrink: 0, border: 'none', cursor: 'pointer', background: enabled ? 'var(--pg-accent)' : 'var(--pg-surface)', position: 'relative', transition: 'background 0.2s' }}>
+        <span style={{ position: 'absolute', top: 2, left: enabled ? 20 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+      </button>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: enabled ? 'var(--pg-text)' : 'var(--pg-text-sec)' }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--pg-text-dim)' }}>{sub}</div>
+      </div>
+      <input className="pg-input" type="number" min="0" value={value} disabled={!enabled} onChange={(e) => onChange(Number(e.target.value))} style={{ width: 80, opacity: enabled ? 1 : 0.4 }} />
+      <span style={{ fontSize: 13, color: 'var(--pg-text-dim)', width: 24 }}>pts</span>
+    </div>
+  );
+}
+
+function LaunchSuccess({ form, config, onNavigate, onReset }: { form: typeof emptyForm; config: object; onNavigate: (page: string, id?: string) => void; onReset: () => void }) {
+  const [showConfig, setShowConfig] = useState(false);
+  const provisioned = [
+    { title: 'Competition created', sub: 'Your settings are saved and live.' },
+    { title: 'On-chain listener started', sub: 'Watching Stellar activity in real time.' },
+    { title: 'Scoring applied', sub: 'Points awarded automatically per action.' },
+    { title: 'Live leaderboard ready', sub: 'Wallets ranked as activity happens.' },
+    { title: 'Prize escrow locked', sub: `${form.prizePool || '0'} USDC secured on Soroban.` },
+  ];
+
+  return (
+    <div style={{ maxWidth: 600, margin: '0 auto', padding: '120px 2rem 60px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+        <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'rgba(16,185,129,0.15)', border: '2px solid var(--pg-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, margin: '0 auto 1.5rem' }}>✓</div>
+        <h2 style={{ fontSize: '1.9rem', fontWeight: 700, marginBottom: 8 }}>You're live!</h2>
+        <p style={{ color: 'var(--pg-text-sec)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--pg-text)' }}>{form.name || 'Your competition'}</strong> is now tracking on-chain activity.
+        </p>
+      </div>
+
+      <div style={{ background: 'var(--pg-mid)', border: '1px solid var(--pg-border)', borderRadius: 14, overflow: 'hidden', marginBottom: '1.5rem' }}>
+        {provisioned.map((p, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderBottom: i < provisioned.length - 1 ? '1px solid var(--pg-border-dim)' : 'none' }}>
+            <div style={{ width: 24, height: 24, borderRadius: '50%', flexShrink: 0, background: 'var(--pg-green)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>✓</div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--pg-text)' }}>{p.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--pg-text-sec)' }}>{p.sub}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={() => setShowConfig((s) => !s)} style={{ background: 'none', border: 'none', color: 'var(--pg-text-dim)', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 12, marginBottom: showConfig ? '0.75rem' : '1.5rem' }}>
+        {showConfig ? '− Hide' : '+ View'} configuration
+      </button>
+      {showConfig && (
+        <pre style={{ background: 'var(--pg-deep)', border: '1px solid var(--pg-border-dim)', borderRadius: 10, padding: '1rem', overflowX: 'auto', fontSize: 12, color: 'var(--pg-text-mono)', fontFamily: "'JetBrains Mono', monospace", marginBottom: '1.5rem', lineHeight: 1.5 }}>
+          {JSON.stringify(config, null, 2)}
+        </pre>
+      )}
+
+      <div style={{ display: 'flex', gap: '1rem' }}>
+        <button className="pg-btn-primary" style={{ flex: 1, padding: '12px 24px', fontSize: 14 }} onClick={() => onNavigate('browse')}>View competitions</button>
+        <button className="pg-btn-secondary" style={{ flex: 1, padding: '12px 24px', fontSize: 14 }} onClick={onReset}>Create another</button>
+      </div>
+    </div>
+  );
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function truncate(addr: string): string {
+  if (!addr) return '';
+  return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
