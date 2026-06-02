@@ -1,342 +1,254 @@
-# SeedSignal
+# ProofGrowth
 
-A decentralized marketplace where founders acquire verified early users through escrow-backed growth campaigns.
+ProofGrowth is a competitive growth marketplace where startups sponsor growth competitions, and participants compete to deliver the highest-quality, verifiable user adoption.
 
-## Problem
-
-Founders often struggle to attract their first active users. Traditional advertising is expensive, difficult to measure, and frequently produces low-quality traffic.
-
-SeedSignal enables founders to pay only for verified engagement rather than clicks, impressions, or unqualified signups.
+Instead of paying for clicks or low-quality signups, founders fund prize pools, define scoring rules, and let participants compete to generate real traction. Smart contracts on Stellar (Soroban) handle escrow and prize distribution.
 
 ---
 
-## How It Works
+# Problem
 
-### 1. Founder Creates Campaign
+Early-stage startups struggle to acquire meaningful users:
 
-A founder defines:
+- Ads bring low-intent traffic
+- Signup incentives attract bots or low-quality users
+- Growth hacks rarely produce retention
+- Founders cannot measure real activation quality
 
-- Number of users needed
-- Required actions
+ProofGrowth replaces guesswork with competitive, verifiable growth outcomes.
+
+---
+
+# Core Idea
+
+Founders do not buy users.
+
+They launch a growth competition:
+
+- Define desired user behaviors
+- Deposit a prize pool into escrow
+- Participants compete to generate the highest score
+- Winners receive payouts automatically
+
+---
+
+# How It Works
+
+## 1. Founder Creates a Competition
+
+The founder defines:
+
+- Objective (e.g. acquire active users)
+- Prize pool (e.g. 500 USDC)
+- Duration (e.g. 14 days)
+- Scoring rules
 - Verification criteria
-- Reward amount
-- Campaign duration
+- Winner structure (Top 1–5 winners)
 
 Example:
 
-**Campaign:** Acquire 13 active users
+Title: Acquire Active Users for SaaS  
+Prize Pool: 500 USDC
 
-Requirements:
+Winners:
 
-- Sign up
-- Complete onboarding
-- Create a project
-- Return after 24 hours
-- Use Feature X
+- 1st: 200 USDC
+- 2nd: 125 USDC
+- 3rd: 75 USDC
+- 4th: 50 USDC
+- 5th: 50 USDC
 
-Reward Pool:
+Scoring:
 
-- 130 USDC
-
-Payout:
-
-- 10 USDC per verified user
-
----
-
-### 2. Funds Enter Escrow
-
-The founder deposits funds into a Soroban smart contract.
-
-The contract:
-
-- Locks campaign funds
-- Tracks campaign progress
-- Releases rewards automatically
-- Returns unused funds when campaign ends
+- Signup: 1 point
+- Onboarding completed: 5 points
+- First core action: 10 points
+- Return after 24h: 20 points
+- Paid conversion: 50 points
 
 ---
 
-### 3. Users Join Campaign
+## 2. Participants Compete
 
-Participants browse available campaigns.
+Participants:
 
-To participate:
-
-1. Connect wallet
-2. Accept campaign requirements
-3. Use the startup product
-4. Complete required actions
+- Connect wallet
+- Join competition
+- Perform user acquisition actions
+- Build leaderboard score
+- Compete in real time
 
 ---
 
-### 4. Verification
+## 3. Verification of Actions
 
-The startup integrates a verification SDK.
+Startups integrate a verification SDK that emits events:
 
-The SDK emits events such as:
+Example events:
 
-```json
 {
-  "event": "user_signed_up",
-  "user": "123"
+"event": "signup",
+"user_id": "123"
 }
-```
 
-```json
 {
-  "event": "completed_onboarding",
-  "user": "123"
+"event": "completed_onboarding",
+"user_id": "123"
 }
-```
 
-```json
 {
-  "event": "created_project",
-  "user": "123"
+"event": "created_project",
+"user_id": "123"
 }
-```
 
-These events are sent to the verification engine.
-
----
-
-### 5. Oracle Validation
-
-Since Soroban cannot directly access application data, an oracle layer validates user actions.
-
-Responsibilities:
-
-- Verify event authenticity
-- Confirm campaign requirements
-- Submit attestations to smart contracts
-
-Example:
-
-```json
-{
-  "campaign_id": "campaign_42",
-  "user": "wallet_address",
-  "verified": true
-}
-```
+These are sent to the verification system.
 
 ---
 
-### 6. Reward Distribution
+## 4. Scoring Engine
 
-When requirements are met:
+Verified actions are converted into points:
 
-1. Oracle submits verification
-2. Smart contract validates proof
-3. Reward is released automatically
+Signup = 1 point  
+Onboarding = 5 points  
+Core action = 10 points  
+Retention (24h return) = 20 points  
+Conversion = 50 points
 
-Example:
-
-```text
-Founder Deposit
-      ↓
-User Completes Tasks
-      ↓
-Oracle Verification
-      ↓
-Smart Contract Release
-      ↓
-Participant Paid
-```
+Each participant accumulates a live score.
 
 ---
 
-## Architecture
+## 5. Leaderboard
 
-```text
-+----------------------+
-| Founder Dashboard    |
-+----------+-----------+
-           |
-           v
-+----------------------+
-| Campaign Service     |
-+----------+-----------+
-           |
-           v
-+----------------------+
-| Soroban Escrow       |
-| Smart Contract       |
-+----------+-----------+
-           ^
-           |
-+----------+-----------+
-| Oracle Verification  |
-+----------+-----------+
-           ^
-           |
-+----------+-----------+
-| Event Processing     |
-+----------+-----------+
-           ^
-           |
-+----------+-----------+
-| Startup Application  |
-+----------------------+
+Real-time rankings:
 
-           ^
-           |
-+----------+-----------+
-| Participants         |
-+----------------------+
-```
+1. Alice — 832 pts
+2. Bob — 790 pts
+3. Felix — 721 pts
+4. Diana — 690 pts
+5. Eric — 640 pts
 
 ---
 
-## Core Components
+## 6. Oracle + Smart Contracts
 
-### Founder Dashboard
+Since app data is off-chain:
 
-Allows founders to:
-
-- Create campaigns
-- Deposit funds
-- Define requirements
-- Track progress
-- Review analytics
+- Verification engine validates events
+- Oracle submits signed attestations
+- Soroban contract updates scores
+- Final leaderboard is locked at end
 
 ---
 
-### Participant Dashboard
+## 7. Prize Distribution
 
-Allows users to:
+At the end of the competition:
 
-- Browse campaigns
-- Join campaigns
-- Track completion status
-- Claim rewards
-- Build reputation
+- Final scores are frozen
+- Winners are selected
+- Smart contract distributes USDC automatically
 
----
-
-### Escrow Contract
-
-Handles:
-
-- Fund custody
-- Reward distribution
-- Campaign lifecycle management
-- Refunds
+No manual payout logic required.
 
 ---
 
-### Verification Engine
+# System Architecture
 
-Handles:
-
-- Event ingestion
-- Rule evaluation
-- Fraud detection
-- Completion scoring
++------------------------+
+| Founder Dashboard |
++------------------------+
+|
+v
++------------------------+
+| Competition Service |
+| - Rules |
+| - Prize Pool |
++------------------------+
+|
+v
++------------------------+
+| Soroban Smart Contract |
+| - Escrow |
+| - Scoring |
+| - Payouts |
++------------------------+
+^
+|
++------------------------+
+| Oracle / Verification |
+| Engine |
++------------------------+
+^
+|
++------------------------+
+| Event Stream |
++------------------------+
+^
+|
++------------------------+
+| Startup App |
++------------------------+
+^
+|
++------------------------+
+| Participants |
++------------------------+
 
 ---
 
-### Oracle Layer
+# Key Components
 
-Bridges:
+## Competition Engine
 
-- Startup application data
-- Blockchain smart contracts
+Defines rules, scoring, duration, and payouts.
+
+## Verification Engine
+
+Validates that user actions are real and not fake.
+
+## Scoring Engine
+
+Turns verified actions into competitive points.
+
+## Leaderboard System
+
+Maintains live rankings.
+
+## Escrow Contract
+
+Holds funds and distributes rewards.
 
 ---
 
-## Fraud Prevention
+# Fraud Prevention
 
-### Sybil Resistance
-
-- Wallet identity
+- Wallet-based identity
 - Device fingerprinting
-- Rate limiting
+- Rate limits
 - Reputation scoring
-
-### Quality Verification
-
-Campaigns may require:
-
-- Multiple actions
-- Multi-day retention
-- Feedback submission
-- Feature usage thresholds
-
-### Delayed Rewards
-
-Rewards can be released after:
-
-- 24 hours
-- 3 days
-- 7 days
-
-This discourages low-quality signups.
+- Retention requirements
 
 ---
 
-## Reputation System
+# Reputation System
 
-### Founder Reputation
+Participants:
 
-Based on:
+- Wins
+- Users acquired
+- Retention rate
+- Fraud flags
 
-- Successful campaigns
+Founders:
+
+- Fairness of rules
 - Payment history
-- User feedback
-
-### Participant Reputation
-
-Based on:
-
-- Verified completions
-- Retention quality
-- Fraud reports
-- Campaign success rate
+- Competition quality
 
 ---
 
-## Future Features
+# Vision
 
-- Referral campaigns
-- AI-generated user feedback analysis
-- On-chain reputation credentials
-- Multi-stage growth campaigns
-- Community verification
-- Analytics dashboards
-- Startup leaderboards
-
----
-
-## Tech Stack
-
-### Frontend
-
-- Next.js
-- React
-- Tailwind CSS
-
-### Backend
-
-- Node.js
-- PostgreSQL
-- Redis
-
-### Blockchain
-
-- Stellar
-- Soroban
-- USDC
-
-### Infrastructure
-
-- Kafka / NATS
-- Verification Service
-- Oracle Service
-
----
-
-## Vision
-
-SeedSignal transforms user acquisition into a verifiable marketplace where founders pay for measurable engagement rather than speculative advertising, and users are rewarded for providing genuine product validation.
+ProofGrowth creates competitive growth markets where startups sponsor user acquisition competitions, and participants compete to deliver verified adoption. Rewards are distributed automatically based on measurable impact.
