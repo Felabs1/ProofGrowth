@@ -41,6 +41,10 @@ export interface CompetitionRow {
   status: CompetitionStatus;
   progress: number;
   created_at: string;
+  create_tx_hash?: string | null;
+  finalize_tx_hash?: string | null;
+  cancel_tx_hash?: string | null;
+  finalized_payouts?: unknown;
 }
 
 export interface SubmissionRow {

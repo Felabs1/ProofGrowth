@@ -43,7 +43,14 @@ export interface Competition {
   participants: number;
   submissionsTotal: number;
   pendingReview: number;
-  status: 'active' | 'ended' | 'upcoming';
+  status: 'active' | 'ended' | 'upcoming' | 'cancelled';
+  schedulePhase?: 'before_start' | 'open' | 'after_end';
+  submissionOpen?: boolean;
+  participationOpen?: boolean;
+  createTxHash?: string;
+  finalizeTxHash?: string;
+  cancelTxHash?: string;
+  finalizedPayouts?: { wallet: string; amount_xlm: number }[];
   winners: number;
   goalType: 'users' | 'volume' | 'leads';
   instructions: string;

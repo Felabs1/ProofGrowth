@@ -227,6 +227,7 @@ export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
         end_at: form.endDate,
         on_chain_id: onChainId,
         token_contract: NATIVE_XLM_TOKEN_CONTRACT,
+        create_tx_hash: txHash,
       });
 
       setLaunchResult({

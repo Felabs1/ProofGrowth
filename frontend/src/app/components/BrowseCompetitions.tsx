@@ -50,6 +50,7 @@ export function BrowseCompetitions({ onNavigate }: BrowseCompetitionsProps) {
     active: { bg: 'rgba(16,185,129,0.15)', color: 'var(--pg-green)' },
     upcoming: { bg: 'rgba(37,99,235,0.15)', color: 'var(--pg-accent-bright)' },
     ended: { bg: 'rgba(75,85,99,0.3)', color: 'var(--pg-text-dim)' },
+    cancelled: { bg: 'rgba(239,68,68,0.15)', color: 'var(--pg-red)' },
   };
 
   return (
@@ -119,7 +120,7 @@ export function BrowseCompetitions({ onNavigate }: BrowseCompetitionsProps) {
           onChange={(e) => setSearch(e.target.value)}
         />
         <div style={{ display: 'flex', gap: 8 }}>
-          {['all', 'active', 'upcoming', 'ended'].map((s) => (
+          {['all', 'active', 'upcoming', 'ended', 'cancelled'].map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}

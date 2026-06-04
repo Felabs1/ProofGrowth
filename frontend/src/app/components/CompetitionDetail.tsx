@@ -8,7 +8,8 @@ import {
   submitProof,
 } from '../api/client';
 import type { Competition, Submission } from '../api/types';
-import { PRIZE_ASSET } from '../config/stellar';
+import { ESCROW_CONTRACT_ID, explorerContractUrl, explorerTxUrl, PRIZE_ASSET } from '../config/stellar';
+import { fetchOnChainEscrow, type OnChainEscrowView } from '../contracts/escrow';
 import {
   countSubmissionsByStatus,
   isFounderOfCompetition,
@@ -39,6 +40,8 @@ export function CompetitionDetail({ competitionId, onNavigate }: CompetitionDeta
   const [founderQueue, setFounderQueue] = useState<Submission[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [onChain, setOnChain] = useState<OnChainEscrowView | null>(null);
+  const [onChainError, setOnChainError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,6 +70,20 @@ export function CompetitionDetail({ competitionId, onNavigate }: CompetitionDeta
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!comp?.onChainId || !address) {
+      setOnChain(null);
+      return;
+    }
+    setOnChainError(null);
+    void fetchOnChainEscrow({ onChainId: comp.onChainId, sourcePublicKey: address })
+      .then(setOnChain)
+      .catch((e) => {
+        setOnChain(null);
+        setOnChainError(e instanceof Error ? e.message : 'Could not read escrow');
+      });
+  }, [comp?.onChainId, address]);
+
   if (loading) {
     return (
       <div className="pg-page" style={{ maxWidth: 1200, margin: '0 auto', padding: '100px 2rem 60px' }}>
@@ -86,6 +103,7 @@ export function CompetitionDetail({ competitionId, onNavigate }: CompetitionDeta
     active: { bg: 'rgba(16,185,129,0.15)', color: 'var(--pg-green)' },
     upcoming: { bg: 'rgba(37,99,235,0.15)', color: 'var(--pg-accent-bright)' },
     ended: { bg: 'rgba(75,85,99,0.3)', color: 'var(--pg-text-dim)' },
+    cancelled: { bg: 'rgba(239,68,68,0.15)', color: 'var(--pg-red)' },
   };
   const sc = statusColors[comp.status] ?? statusColors.ended;
 
@@ -96,7 +114,8 @@ export function CompetitionDetail({ competitionId, onNavigate }: CompetitionDeta
   };
 
   const prizeDistribution = [50, 30, 20];
-  const canSubmit = joined && comp.status === 'active';
+  const canSubmit = joined && (comp.submissionOpen ?? comp.status === 'active');
+  const canJoin = comp.participationOpen ?? (comp.status === 'active' || comp.status === 'upcoming');
   const isHost = isFounderOfCompetition(comp, address);
   const hostCounts = isHost ? countSubmissionsByStatus(founderQueue, comp.id) : null;
 
@@ -450,6 +469,88 @@ export function CompetitionDetail({ competitionId, onNavigate }: CompetitionDeta
 
       {tab === 'overview' && (
         <div className="pg-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+          {comp.onChainId != null && (
+            <div
+              style={{
+                background: 'var(--pg-mid)',
+                border: '1px solid var(--pg-border)',
+                borderRadius: 14,
+                padding: '1.25rem',
+                gridColumn: '1 / -1',
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 12,
+                  color: 'var(--pg-text-sec)',
+                  marginBottom: 12,
+                }}
+              >
+                ON-CHAIN ESCROW
+              </div>
+              {onChainError && (
+                <p style={{ fontSize: 13, color: 'var(--pg-red)', margin: 0 }}>{onChainError}</p>
+              )}
+              {onChain && (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                    gap: 12,
+                    fontSize: 13,
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}
+                >
+                  <div>
+                    <div style={{ color: 'var(--pg-text-dim)', fontSize: 11 }}>Competition #</div>
+                    {onChain.onChainId}
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--pg-text-dim)', fontSize: 11 }}>Status</div>
+                    {onChain.onChainStatus}
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--pg-text-dim)', fontSize: 11 }}>Pool (locked)</div>
+                    {onChain.prizePoolXlm} XLM
+                  </div>
+                  {onChain.escrowBalanceXlm != null && (
+                    <div>
+                      <div style={{ color: 'var(--pg-text-dim)', fontSize: 11 }}>Contract balance</div>
+                      {onChain.escrowBalanceXlm} XLM
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--pg-text-dim)' }}>
+                {comp.createTxHash && (
+                  <a href={explorerTxUrl(comp.createTxHash)} target="_blank" rel="noreferrer">
+                    Create tx
+                  </a>
+                )}
+                {comp.finalizeTxHash && (
+                  <>
+                    {' · '}
+                    <a href={explorerTxUrl(comp.finalizeTxHash)} target="_blank" rel="noreferrer">
+                      Finalize tx
+                    </a>
+                  </>
+                )}
+                {comp.cancelTxHash && (
+                  <>
+                    {' · '}
+                    <a href={explorerTxUrl(comp.cancelTxHash)} target="_blank" rel="noreferrer">
+                      Cancel tx
+                    </a>
+                  </>
+                )}
+                {' · '}
+                <a href={explorerContractUrl(ESCROW_CONTRACT_ID)} target="_blank" rel="noreferrer">
+                  Contract
+                </a>
+              </div>
+            </div>
+          )}
           <div
             style={{
               background: 'var(--pg-mid)',
@@ -625,10 +726,27 @@ export function CompetitionDetail({ competitionId, onNavigate }: CompetitionDeta
               }}
             >
               <p style={{ color: 'var(--pg-text-sec)', marginBottom: '1rem' }}>Join this competition to submit proof of your growth work.</p>
-              <button type="button" className="pg-btn-primary" onClick={() => void handleJoin()}>
-                Join competition
-              </button>
+              {canJoin ? (
+                <button type="button" className="pg-btn-primary" onClick={() => void handleJoin()}>
+                  Join competition
+                </button>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--pg-text-dim)', margin: 0 }}>
+                  {comp.schedulePhase === 'before_start'
+                    ? `Opens ${comp.startDate}`
+                    : 'This competition is not accepting participants.'}
+                </p>
+              )}
             </div>
+          )}
+          {joined && !canSubmit && (
+            <p style={{ fontSize: 13, color: 'var(--pg-amber)', marginBottom: '1rem' }}>
+              {comp.schedulePhase === 'before_start'
+                ? `Submissions open on ${comp.startDate}.`
+                : comp.schedulePhase === 'after_end'
+                  ? 'Submission period ended. Awaiting founder finalize.'
+                  : 'Submissions are closed.'}
+            </p>
           )}
 
           {showForm && canSubmit && (

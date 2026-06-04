@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import { parseJsonArray, parseJsonObject, toNumber } from './lib/jsonFields.js';
 import { competitionStats, computeLeaderboard, daysLeft } from './services/leaderboard.js';
+import { participationOpen, schedulePhase, submissionOpen } from './services/schedule.js';
 import type { CompetitionRow, SubmissionRow } from './types.js';
 
 export function mapSubmission(row: SubmissionRow, competitionTitle?: string) {
@@ -39,7 +40,18 @@ export async function mapCompetition(pool: pg.Pool, row: CompetitionRow) {
     participants: stats.participants,
     submissionsTotal: stats.submissions_total,
     pendingReview: stats.pending_review,
-    status: row.status === 'cancelled' ? 'ended' : row.status,
+    status: row.status,
+    schedulePhase: schedulePhase(row.start_at, row.end_at),
+    submissionOpen: submissionOpen({
+      status: row.status,
+      startAt: row.start_at,
+      endAt: row.end_at,
+    }),
+    participationOpen: participationOpen({
+      status: row.status,
+      startAt: row.start_at,
+      endAt: row.end_at,
+    }),
     winners: row.winners_count,
     goalType: row.goal_type,
     instructions: row.instructions,
@@ -51,6 +63,12 @@ export async function mapCompetition(pool: pg.Pool, row: CompetitionRow) {
     prizeAsset: row.prize_asset,
     tokenContract: row.token_contract,
     winnerSplit: parseJsonObject(row.winner_split, { top: row.winners_count }),
+    createTxHash: row.create_tx_hash ?? undefined,
+    finalizeTxHash: row.finalize_tx_hash ?? undefined,
+    cancelTxHash: row.cancel_tx_hash ?? undefined,
+    finalizedPayouts: parseJsonArray<{ wallet: string; amount_xlm: number }>(
+      row.finalized_payouts ?? null,
+    ),
   };
 }
 

@@ -33,6 +33,11 @@ export function toStroops(amount: number): bigint {
   return BigInt(Math.round(amount * 10 ** NATIVE_DECIMALS));
 }
 
+export function fromStroops(stroops: bigint | number | string): number {
+  const n = typeof stroops === 'bigint' ? Number(stroops) : Number(stroops);
+  return n / 10 ** NATIVE_DECIMALS;
+}
+
 export function explorerContractUrl(contractId: string): string {
   return `https://stellar.expert/explorer/testnet/contract/${contractId}`;
 }

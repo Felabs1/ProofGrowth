@@ -5,6 +5,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { mapCompetition } from '../mappers.js';
 import { optionalEvidenceUrl, zodErrorMessage } from '../lib/validation.js';
 import { NATIVE_XLM_TOKEN_CONTRACT, PRIZE_ASSET } from '../config/stellar.js';
+import { participationOpen, submissionOpen } from '../services/schedule.js';
 import type { CompetitionRow, SubmissionRow } from '../types.js';
 
 const router = Router();
@@ -28,6 +29,7 @@ const createSchema = z.object({
   start_at: z.string(),
   end_at: z.string(),
   on_chain_id: z.number().int().nonnegative().optional(),
+  create_tx_hash: z.string().min(1).optional(),
 });
 
 router.get(
@@ -83,8 +85,9 @@ router.post(
       INSERT INTO competitions (
         id, on_chain_id, founder_wallet, title, description, category, goal_type,
         instructions, proof_requirements, scoring_rules, prize_pool, prize_asset,
-        token_contract, winners_count, winner_split, start_at, end_at, status, progress
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,0)
+        token_contract, winners_count, winner_split, start_at, end_at, status, progress,
+        create_tx_hash
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,0,$19)
     `,
       [
         id,
@@ -105,6 +108,7 @@ router.post(
         data.start_at,
         data.end_at,
         status,
+        data.create_tx_hash ?? null,
       ],
     );
     const { rows } = await pool.query<CompetitionRow>('SELECT * FROM competitions WHERE id = $1', [id]);
@@ -125,9 +129,22 @@ router.post(
       return;
     }
     const pool = getPool();
-    const comp = await pool.query('SELECT id FROM competitions WHERE id = $1', [req.params.id]);
-    if (comp.rowCount === 0) {
+    const comp = await pool.query<CompetitionRow>('SELECT * FROM competitions WHERE id = $1', [
+      req.params.id,
+    ]);
+    const row = comp.rows[0];
+    if (!row) {
       res.status(404).json({ error: 'Competition not found' });
+      return;
+    }
+    if (
+      !participationOpen({
+        status: row.status,
+        startAt: row.start_at,
+        endAt: row.end_at,
+      })
+    ) {
+      res.status(400).json({ error: 'This competition is not open for new participants' });
       return;
     }
     const { participant_wallet, participant_name } = parsed.data;
@@ -162,12 +179,28 @@ router.post(
       return;
     }
     const pool = getPool();
-    const comp = await pool.query<{ id: string; title: string }>(
-      'SELECT id, title FROM competitions WHERE id = $1',
+    const comp = await pool.query<CompetitionRow>(
+      'SELECT * FROM competitions WHERE id = $1',
       [req.params.id],
     );
-    if (comp.rowCount === 0) {
+    const row = comp.rows[0];
+    if (!row) {
       res.status(404).json({ error: 'Competition not found' });
+      return;
+    }
+    if (
+      !submissionOpen({
+        status: row.status,
+        startAt: row.start_at,
+        endAt: row.end_at,
+      })
+    ) {
+      res.status(400).json({
+        error:
+          row.status !== 'active'
+            ? 'Submissions are closed for this competition'
+            : 'Submissions are outside the competition date window',
+      });
       return;
     }
     const data = parsed.data;
@@ -202,7 +235,7 @@ router.post(
     );
     const { rows } = await pool.query<SubmissionRow>('SELECT * FROM submissions WHERE id = $1', [id]);
     res.status(201).json({
-      submission: mapSubmissionFromDb(rows[0], comp.rows[0].title),
+      submission: mapSubmissionFromDb(rows[0], row.title),
     });
   }),
 );
@@ -247,12 +280,18 @@ router.get(
 
 const finalizeSchema = z.object({
   founder_wallet: z.string().min(1),
+  finalize_tx_hash: z.string().min(1).optional(),
   payouts: z.array(
     z.object({
       wallet: z.string().min(1),
       amount_xlm: z.number().positive(),
     }),
   ),
+});
+
+const cancelSchema = z.object({
+  founder_wallet: z.string().min(1),
+  cancel_tx_hash: z.string().min(1),
 });
 
 router.post(
@@ -293,12 +332,59 @@ router.post(
       return;
     }
 
-    await pool.query("UPDATE competitions SET status = 'ended' WHERE id = $1", [req.params.id]);
+    await pool.query(
+      `UPDATE competitions SET status = 'ended', finalize_tx_hash = $2, finalized_payouts = $3 WHERE id = $1`,
+      [req.params.id, parsed.data.finalize_tx_hash ?? null, JSON.stringify(parsed.data.payouts)],
+    );
     res.json({
       finalized: true,
       competitionId: req.params.id,
       onChainId: Number(comp.on_chain_id),
+      finalizeTxHash: parsed.data.finalize_tx_hash,
       payouts: parsed.data.payouts,
+    });
+  }),
+);
+
+router.post(
+  '/:id/cancel',
+  asyncHandler(async (req, res) => {
+    const parsed = cancelSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: zodErrorMessage(parsed.error), details: parsed.error.flatten() });
+      return;
+    }
+    const pool = getPool();
+    const { rows } = await pool.query<CompetitionRow>('SELECT * FROM competitions WHERE id = $1', [
+      req.params.id,
+    ]);
+    const comp = rows[0];
+    if (!comp) {
+      res.status(404).json({ error: 'Competition not found' });
+      return;
+    }
+    if (comp.founder_wallet !== parsed.data.founder_wallet) {
+      res.status(403).json({ error: 'Only the competition founder can cancel' });
+      return;
+    }
+    if (comp.status !== 'active' && comp.status !== 'upcoming') {
+      res.status(400).json({ error: 'Only active or upcoming competitions can be cancelled' });
+      return;
+    }
+    if (comp.on_chain_id == null) {
+      res.status(400).json({ error: 'Competition has no on_chain_id' });
+      return;
+    }
+
+    await pool.query(
+      `UPDATE competitions SET status = 'cancelled', cancel_tx_hash = $2 WHERE id = $1`,
+      [req.params.id, parsed.data.cancel_tx_hash],
+    );
+    res.json({
+      cancelled: true,
+      competitionId: req.params.id,
+      onChainId: Number(comp.on_chain_id),
+      cancelTxHash: parsed.data.cancel_tx_hash,
     });
   }),
 );

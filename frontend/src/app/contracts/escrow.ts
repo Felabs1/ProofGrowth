@@ -14,6 +14,7 @@ import {
   NATIVE_XLM_TOKEN_CONTRACT,
   NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
+  fromStroops,
   toStroops,
 } from '../config/stellar';
 import { debugError, debugLog } from '../utils/debug';
@@ -51,6 +52,51 @@ function assertStellarSdk(): void {
 
 export type SignTxFn = (xdr: string) => Promise<{ signedTxXdr: string }>;
 
+export interface OnChainEscrowView {
+  onChainId: number;
+  founder: string;
+  prizePoolXlm: number;
+  winnersCount: number;
+  onChainStatus: string;
+  title: string;
+  escrowBalanceXlm: number | null;
+}
+
+async function simulateContractRead(
+  sourcePublicKey: string,
+  operationName: string,
+  build: (contract: Contract) => xdr.Operation,
+): Promise<xdr.ScVal | undefined> {
+  const contract = new Contract(ESCROW_CONTRACT_ID);
+  const account = await server.getAccount(sourcePublicKey);
+  let tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(build(contract))
+    .setTimeout(30)
+    .build();
+  const prepared = await server.prepareTransaction(tx);
+  const sim = await server.simulateTransaction(prepared);
+  if (!rpc.Api.isSimulationSuccess(sim)) {
+    const err =
+      'error' in sim && typeof (sim as { error?: string }).error === 'string'
+        ? (sim as { error: string }).error
+        : 'Simulation failed';
+    throw new Error(`${operationName}: ${err}`);
+  }
+  return sim.result?.retval;
+}
+
+function parseOnChainStatus(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object') {
+    const tag = (raw as { tag?: string; name?: string }).tag ?? (raw as { name?: string }).name;
+    if (tag) return tag;
+  }
+  return String(raw ?? 'Unknown');
+}
+
 async function pollTransaction(hash: string, maxAttempts = 60): Promise<rpc.Api.GetTransactionResponse> {
   debugLog(SCOPE, 'pollTransaction:start', { hash, maxAttempts });
   for (let i = 0; i < maxAttempts; i++) {
@@ -64,12 +110,31 @@ async function pollTransaction(hash: string, maxAttempts = 60): Promise<rpc.Api.
   throw new Error('Transaction not found on ledger (timed out)');
 }
 
+/** One Soroban `Payout` struct (map keys sorted: amount, winner). */
 function payoutToScVal(wallet: string, stroops: bigint): xdr.ScVal {
-  return xdr.ScVal.scvMap(
-    new Map([
-      [xdr.ScVal.scvSymbol('winner'), new Address(wallet).toScVal()],
-      [xdr.ScVal.scvSymbol('amount'), new ScInt(stroops).toScVal()],
-    ]),
+  return xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('amount'),
+      val: new ScInt(stroops, { type: 'i128' }).toScVal(),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('winner'),
+      val: new Address(wallet).toScVal(),
+    }),
+  ]);
+}
+
+/** Vec<Payout> for `finalize_and_distribute` — use ScMapEntry[], not `new Map()` (breaks toXDR). */
+function payoutsToScVal(payouts: PayoutLine[]): xdr.ScVal {
+  for (const p of payouts) {
+    try {
+      new Address(p.wallet);
+    } catch {
+      throw new Error(`Invalid winner wallet for payout: ${p.wallet}`);
+    }
+  }
+  return xdr.ScVal.scvVec(
+    payouts.map((p) => payoutToScVal(p.wallet, toStroops(p.amount_xlm))),
   );
 }
 
@@ -230,9 +295,7 @@ export async function finalizeAndDistributeOnChain(opts: {
     payouts: opts.payouts,
   });
 
-  const payoutsVec = xdr.ScVal.scvVec(
-    opts.payouts.map((p) => payoutToScVal(p.wallet, toStroops(p.amount_xlm))),
-  );
+  const payoutsScVal = payoutsToScVal(opts.payouts);
 
   const { hash } = await submitContractTx(
     opts.founderAddress,
@@ -242,10 +305,77 @@ export async function finalizeAndDistributeOnChain(opts: {
       contract.call(
         'finalize_and_distribute',
         xdr.ScVal.scvU64(BigInt(opts.onChainId)),
-        payoutsVec,
+        payoutsScVal,
       ),
   );
 
   debugLog(SCOPE, 'finalizeAndDistributeOnChain:done', { hash });
   return { txHash: hash };
+}
+
+export async function cancelCompetitionOnChain(opts: {
+  founderAddress: string;
+  onChainId: number;
+  signTransaction: SignTxFn;
+}): Promise<{ txHash: string }> {
+  const { hash } = await submitContractTx(
+    opts.founderAddress,
+    opts.signTransaction,
+    'cancel_competition',
+    (contract) =>
+      contract.call('cancel_competition', xdr.ScVal.scvU64(BigInt(opts.onChainId))),
+  );
+  return { txHash: hash };
+}
+
+export async function fetchOnChainEscrow(opts: {
+  onChainId: number;
+  /** Any funded testnet account for simulation (e.g. connected wallet). */
+  sourcePublicKey: string;
+}): Promise<OnChainEscrowView> {
+  const compVal = await simulateContractRead(
+    opts.sourcePublicKey,
+    'get_competition',
+    (contract) =>
+      contract.call('get_competition', xdr.ScVal.scvU64(BigInt(opts.onChainId))),
+  );
+  if (!compVal) {
+    throw new Error('No return value from get_competition');
+  }
+  const raw = scValToNative(compVal) as Record<string, unknown>;
+  const founder =
+    raw.founder instanceof Address
+      ? raw.founder.toString()
+      : String(raw.founder ?? '');
+  const prizeStroops = raw.prize_pool ?? raw.prizePool ?? 0;
+
+  let escrowBalanceXlm: number | null = null;
+  try {
+    const balVal = await simulateContractRead(
+      opts.sourcePublicKey,
+      'escrow_balance',
+      (contract) =>
+        contract.call('escrow_balance', xdr.ScVal.scvU64(BigInt(opts.onChainId))),
+    );
+    if (balVal) {
+      const bal = scValToNative(balVal);
+      escrowBalanceXlm = fromStroops(
+        typeof bal === 'bigint' ? bal : Number(bal),
+      );
+    }
+  } catch {
+    escrowBalanceXlm = null;
+  }
+
+  return {
+    onChainId: opts.onChainId,
+    founder,
+    prizePoolXlm: fromStroops(
+      typeof prizeStroops === 'bigint' ? prizeStroops : Number(prizeStroops),
+    ),
+    winnersCount: Number(raw.winners_count ?? raw.winnersCount ?? 0),
+    onChainStatus: parseOnChainStatus(raw.status),
+    title: String(raw.title ?? ''),
+    escrowBalanceXlm,
+  };
 }

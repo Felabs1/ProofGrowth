@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  cancelCompetitionOnPlatform,
   finalizeCompetitionOnPlatform,
   listCompetitions,
   listFounderSubmissions,
 } from '../api/client';
 import type { Competition } from '../api/types';
 import { PRIZE_ASSET } from '../config/stellar';
-import { finalizeAndDistributeOnChain } from '../contracts/escrow';
+import { cancelCompetitionOnChain, finalizeAndDistributeOnChain } from '../contracts/escrow';
 import { debugError, debugLog } from '../utils/debug';
 import { countSubmissionsByStatus } from '../data/helpers';
 import { buildPayoutsFromCompetition } from '../utils/payouts';
@@ -27,6 +28,7 @@ export function FounderDashboard({ onNavigate }: FounderDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [finalizingId, setFinalizingId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [finalizeMsg, setFinalizeMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -91,6 +93,7 @@ export function FounderDashboard({ onNavigate }: FounderDashboardProps) {
       });
       await finalizeCompetitionOnPlatform(comp.id, {
         founder_wallet: wallet,
+        finalize_tx_hash: txHash,
         payouts,
       });
       debugLog('founder-dashboard', 'finalize:success', { txHash });
@@ -104,6 +107,36 @@ export function FounderDashboard({ onNavigate }: FounderDashboardProps) {
       setFinalizeMsg(e instanceof Error ? e.message : 'Finalize failed');
     } finally {
       setFinalizingId(null);
+    }
+  };
+
+  const handleCancel = async (comp: Competition) => {
+    let wallet = address;
+    if (!wallet) {
+      await connect();
+      wallet = (await StellarWalletsKit.getAddress()).address;
+    }
+    if (!wallet || comp.onChainId == null) return;
+    if (!window.confirm(`Cancel "${comp.title}" and refund escrow to your wallet?`)) return;
+
+    setCancellingId(comp.id);
+    setFinalizeMsg(null);
+    try {
+      const { txHash } = await cancelCompetitionOnChain({
+        founderAddress: wallet,
+        onChainId: comp.onChainId,
+        signTransaction,
+      });
+      await cancelCompetitionOnPlatform(comp.id, {
+        founder_wallet: wallet,
+        cancel_tx_hash: txHash,
+      });
+      setFinalizeMsg(`Cancelled ${comp.title} — ${explorerTxUrl(txHash)}`);
+      await load();
+    } catch (e) {
+      setFinalizeMsg(e instanceof Error ? e.message : 'Cancel failed');
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -243,10 +276,21 @@ export function FounderDashboard({ onNavigate }: FounderDashboardProps) {
                       type="button"
                       className="pg-btn-primary"
                       style={{ fontSize: 13 }}
-                      disabled={finalizingId === c.id}
+                      disabled={finalizingId === c.id || cancellingId === c.id}
                       onClick={() => void handleFinalize(c)}
                     >
                       {finalizingId === c.id ? 'Finalizing…' : 'Finalize & pay'}
+                    </button>
+                  )}
+                  {(c.status === 'active' || c.status === 'upcoming') && c.onChainId != null && (
+                    <button
+                      type="button"
+                      className="pg-btn-secondary"
+                      style={{ fontSize: 13 }}
+                      disabled={finalizingId === c.id || cancellingId === c.id}
+                      onClick={() => void handleCancel(c)}
+                    >
+                      {cancellingId === c.id ? 'Cancelling…' : 'Cancel & refund'}
                     </button>
                   )}
                 </div>

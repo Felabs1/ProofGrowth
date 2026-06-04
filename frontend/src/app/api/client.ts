@@ -86,6 +86,7 @@ export interface CreateCompetitionPayload {
   end_at: string;
   on_chain_id: number;
   token_contract: string;
+  create_tx_hash?: string;
 }
 
 export async function listCompetitions(opts?: {
@@ -202,10 +203,21 @@ export async function finalizeCompetitionOnPlatform(
   competitionId: string,
   body: {
     founder_wallet: string;
+    finalize_tx_hash?: string;
     payouts: { wallet: string; amount_xlm: number }[];
   },
 ): Promise<{ finalized: boolean; onChainId: number; payouts: { wallet: string; amount_xlm: number }[] }> {
   return request(`/competitions/${competitionId}/finalize`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function cancelCompetitionOnPlatform(
+  competitionId: string,
+  body: { founder_wallet: string; cancel_tx_hash: string },
+): Promise<{ cancelled: boolean; onChainId: number; cancelTxHash: string }> {
+  return request(`/competitions/${competitionId}/cancel`, {
     method: 'POST',
     body: JSON.stringify(body),
   });

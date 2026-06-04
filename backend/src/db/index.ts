@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { MIGRATION_SQL } from './migrations.js';
 import { SCHEMA_SQL } from './schema.js';
 
 const { Pool } = pg;
@@ -25,6 +26,7 @@ export async function migrate(): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query(SCHEMA_SQL);
+    await client.query(MIGRATION_SQL);
   } finally {
     client.release();
   }
