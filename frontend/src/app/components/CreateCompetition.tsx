@@ -3,6 +3,11 @@ import { createCompetitionOnPlatform } from "../api/client";
 import { createCompetitionOnChain } from "../contracts/escrow";
 import { debugError, debugLog } from "../utils/debug";
 import {
+  FEE_RESERVE_XLM,
+  fetchAccountXlmBalance,
+  insufficientBalanceMessage,
+} from "../utils/stellarBalance";
+import {
   ESCROW_CONTRACT_ID,
   explorerContractUrl,
   explorerTxUrl,
@@ -185,6 +190,26 @@ export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
       return;
     }
 
+    const prizePoolXlm = Number(form.prizePool);
+    try {
+      const balanceXlm = await fetchAccountXlmBalance(founderAddress);
+      if (balanceXlm < prizePoolXlm + FEE_RESERVE_XLM) {
+        setLaunchError(
+          insufficientBalanceMessage({
+            balanceXlm,
+            prizePoolXlm,
+            wallet: founderAddress,
+          }),
+        );
+        return;
+      }
+    } catch (e) {
+      debugError("create-competition", "launch:balance-check-failed", e, {
+        founderAddress,
+      });
+      // Continue — on-chain simulation will still fail with a clear message if underfunded.
+    }
+
     setLaunching(true);
     debugLog("create-competition", "launch:start", {
       founderAddress,
@@ -195,7 +220,7 @@ export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
       const { onChainId, txHash } = await createCompetitionOnChain({
         founderAddress,
         title: form.name.trim(),
-        amountXlm: Number(form.prizePool),
+        amountXlm: prizePoolXlm,
         winnersCount,
         signTransaction,
       });

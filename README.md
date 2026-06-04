@@ -206,13 +206,29 @@ cargo test
 The repo uses [Vercel Services](https://vercel.com/docs/services): Vite UI at `/`, Express API at `/_/backend` (see root `vercel.json`).
 
 1. Import the Git repo in Vercel and set the project **Framework Preset** to **Services** (required when `experimentalServices` is present).
-2. Add environment variables (Production + Preview):
-   - `DATABASE_URL` — hosted PostgreSQL (e.g. [Neon](https://neon.tech), Supabase, or Vercel Postgres). Local Docker URL will not work on Vercel.
-   - Optional: `ESCROW_CONTRACT_ID`, `PRIZE_TOKEN_CONTRACT`, `SOROBAN_RPC_URL` (defaults match testnet in `.env.example`).
+2. Add environment variables (Production + Preview) — see [Environment variables](#environment-variables-on-vercel) below.
 3. Deploy. The UI calls the API at `/_/backend` automatically in production builds (no `VITE_API_URL` needed unless you use a custom path).
 4. Local multi-service dev (Vercel CLI ≥ 47): from repo root, `vercel dev -L`.
 
 Health check after deploy: `https://<your-app>.vercel.app/_/backend/health`
+
+### Environment variables on Vercel
+
+Vercel Services use **one env list per project**, but that does **not** mean every variable is shared with the browser. What matters is the **prefix and which code reads it**:
+
+| Variable | Set in Vercel? | Who sees it |
+| -------- | -------------- | ----------- |
+| `DATABASE_URL` | Yes (required) | **Backend only** — `process.env` in Express; never referenced in `frontend/` |
+| `ESCROW_CONTRACT_ID`, `PRIZE_TOKEN_CONTRACT`, `SOROBAN_RPC_URL` | Optional | Backend `/health` only; frontend uses its own `VITE_*` copies for wallet/contract calls |
+| `VITE_*` (e.g. `VITE_ESCROW_CONTRACT_ID`) | Optional | **Public** — inlined into the JS bundle at build time; treat as visible to users |
+
+Rules:
+
+- **Never** prefix secrets with `VITE_` (Vite will embed them in client JS).
+- **Do not** read `DATABASE_URL` (or any secret) from `import.meta.env` in the frontend.
+- Contract IDs and RPC URLs are already public on-chain; duplicating them as `VITE_*` on the frontend is intentional, not a leak of DB credentials.
+
+If you want **hard separation** of env stores (separate dashboards, access control, or different teams), deploy `frontend/` and `backend/` as **two Vercel projects** and set `VITE_API_URL` to the backend deployment URL. Same-origin `/_/backend` is simpler and safe when you follow the prefix rules above.
 
 ---
 

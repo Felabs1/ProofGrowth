@@ -18,6 +18,7 @@ import {
   toStroops,
 } from '../config/stellar';
 import { debugError, debugLog } from '../utils/debug';
+import { friendlySorobanError } from '../utils/stellarBalance';
 import type { PayoutLine } from '../utils/payouts';
 
 const SCOPE = 'escrow';
@@ -228,7 +229,8 @@ async function submitContractTx(
     return { hash: sent.hash, result };
   } catch (e) {
     debugError(SCOPE, `submitContractTx:${operationName}`, e, { founderAddress });
-    throw e;
+    const raw = e instanceof Error ? e.message : String(e);
+    throw new Error(friendlySorobanError(raw));
   }
 }
 
