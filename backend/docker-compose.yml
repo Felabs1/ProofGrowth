@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zaotrak-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zaotrak
+      POSTGRES_PASSWORD: zaotrak
+      POSTGRES_DB: zaotrak
+    ports:
+      - '5432:5432'
+    volumes:
+      - zaotrak_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U zaotrak -d zaotrak']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  zaotrak_pg_data:
