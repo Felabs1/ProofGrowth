@@ -201,6 +201,19 @@ cd zaotrak_contract/contracts/zaotrak-escrow
 cargo test
 ```
 
+### Deploy to Vercel (frontend + API on one domain)
+
+The repo uses [Vercel Services](https://vercel.com/docs/services): Vite UI at `/`, Express API at `/_/backend` (see root `vercel.json`).
+
+1. Import the Git repo in Vercel and set the project **Framework Preset** to **Services** (required when `experimentalServices` is present).
+2. Add environment variables (Production + Preview):
+   - `DATABASE_URL` — hosted PostgreSQL (e.g. [Neon](https://neon.tech), Supabase, or Vercel Postgres). Local Docker URL will not work on Vercel.
+   - Optional: `ESCROW_CONTRACT_ID`, `PRIZE_TOKEN_CONTRACT`, `SOROBAN_RPC_URL` (defaults match testnet in `.env.example`).
+3. Deploy. The UI calls the API at `/_/backend` automatically in production builds (no `VITE_API_URL` needed unless you use a custom path).
+4. Local multi-service dev (Vercel CLI ≥ 47): from repo root, `vercel dev -L`.
+
+Health check after deploy: `https://<your-app>.vercel.app/_/backend/health`
+
 ---
 
 ## Data model

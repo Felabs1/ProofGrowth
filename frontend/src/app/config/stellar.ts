@@ -22,7 +22,11 @@ export const NATIVE_XLM_TOKEN_CONTRACT =
   import.meta.env.VITE_USDC_TOKEN_CONTRACT ??
   DEFAULT_NATIVE_XLM_CONTRACT_ID;
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+/** Same-origin API on Vercel Services (`/_/backend`); override with VITE_API_URL if needed. */
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL ??
+  import.meta.env.VITE_PUBLIC_BACKEND_URL ??
+  (import.meta.env.DEV ? 'http://localhost:3001' : '/_/backend');
 
 export const NETWORK_PASSPHRASE = Networks.TESTNET;
 

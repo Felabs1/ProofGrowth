@@ -18,7 +18,11 @@ export function getDatabaseUrl(): string {
 
 export function getPool(): pg.Pool {
   if (pool) return pool;
-  pool = new Pool({ connectionString: getDatabaseUrl() });
+  pool = new Pool({
+    connectionString: getDatabaseUrl(),
+    // Serverless: keep a single connection per instance to avoid exhausting Postgres limits.
+    max: process.env.VERCEL ? 1 : 20,
+  });
   return pool;
 }
 
