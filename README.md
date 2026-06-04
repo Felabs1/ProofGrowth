@@ -8,6 +8,57 @@ The platform does **not** claim to automatically verify off-platform outcomes (e
 
 ---
 
+- [ZaoTrak](#zaotrak)
+  - [Problem](#problem)
+  - [Core idea](#core-idea)
+  - [How it works](#how-it-works)
+    - [1. Founder creates a competition](#1-founder-creates-a-competition)
+    - [2. Participants join and submit](#2-participants-join-and-submit)
+    - [3. Founder reviews submissions](#3-founder-reviews-submissions)
+    - [4. Leaderboard](#4-leaderboard)
+    - [5. Escrow and payout (on-chain)](#5-escrow-and-payout-on-chain)
+    - [6. Optional future: automated tracking](#6-optional-future-automated-tracking)
+  - [Roles](#roles)
+  - [System architecture (target)](#system-architecture-target)
+  - [Repository layout](#repository-layout)
+    - [Frontend routes (prototype)](#frontend-routes-prototype)
+    - [Deploy to Vercel (frontend + API on one domain)](#deploy-to-vercel-frontend--api-on-one-domain)
+    - [Environment variables on Vercel](#environment-variables-on-vercel)
+  - [Data model](#data-model)
+    - [Identifiers](#identifiers)
+    - [Frontend types](#frontend-types)
+      - [`SubmissionStatus`](#submissionstatus)
+      - [`Submission`](#submission)
+      - [`Competition`](#competition)
+      - [`LeaderboardEntry` (nested in `Competition`)](#leaderboardentry-nested-in-competition)
+      - [`Participant` (global leaderboard)](#participant-global-leaderboard)
+      - [`ReviewTab`](#reviewtab)
+      - [Create competition form (`CreateCompetition.tsx`)](#create-competition-form-createcompetitiontsx)
+      - [Launch config JSON (`CreateCompetition.tsx` — logged on success, not saved)](#launch-config-json-createcompetitiontsx--logged-on-success-not-saved)
+      - [UI-only state (not in `mockData.ts`)](#ui-only-state-not-in-mockdatats)
+      - [Mock session identities](#mock-session-identities)
+    - [Planned backend API](#planned-backend-api)
+      - [`competitions` table / resource](#competitions-table--resource)
+      - [`submissions` table / resource](#submissions-table--resource)
+      - [`participations` table (optional)](#participations-table-optional)
+      - [`leaderboard_entries` (derived or materialized)](#leaderboard_entries-derived-or-materialized)
+      - [Example API shapes](#example-api-shapes)
+    - [On-chain (`zaotrak-escrow`)](#on-chain-zaotrak-escrow)
+      - [`Competition` (contract storage)](#competition-contract-storage)
+      - [`Payout` (finalize input + storage)](#payout-finalize-input--storage)
+      - [`CompetitionStatus`](#competitionstatus)
+      - [Contract errors (`Error`)](#contract-errors-error)
+      - [Contract functions (arguments)](#contract-functions-arguments)
+    - [Cross-layer mapping](#cross-layer-mapping)
+  - [Key components](#key-components)
+    - [Competition engine](#competition-engine)
+    - [Submission workflow](#submission-workflow)
+    - [Leaderboard](#leaderboard)
+    - [Escrow contract (Soroban)](#escrow-contract-soroban)
+  - [Trust and fraud (pragmatic)](#trust-and-fraud-pragmatic)
+  - [Current status](#current-status)
+  - [Vision](#vision)
+
 ## Problem
 
 Early-stage startups struggle to acquire meaningful users:
@@ -216,11 +267,11 @@ Health check after deploy: `https://<your-app>.vercel.app/_/backend/health`
 
 Vercel Services use **one env list per project**, but that does **not** mean every variable is shared with the browser. What matters is the **prefix and which code reads it**:
 
-| Variable | Set in Vercel? | Who sees it |
-| -------- | -------------- | ----------- |
-| `DATABASE_URL` | Yes (required) | **Backend only** — `process.env` in Express; never referenced in `frontend/` |
-| `ESCROW_CONTRACT_ID`, `PRIZE_TOKEN_CONTRACT`, `SOROBAN_RPC_URL` | Optional | Backend `/health` only; frontend uses its own `VITE_*` copies for wallet/contract calls |
-| `VITE_*` (e.g. `VITE_ESCROW_CONTRACT_ID`) | Optional | **Public** — inlined into the JS bundle at build time; treat as visible to users |
+| Variable                                                        | Set in Vercel? | Who sees it                                                                             |
+| --------------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                  | Yes (required) | **Backend only** — `process.env` in Express; never referenced in `frontend/`            |
+| `ESCROW_CONTRACT_ID`, `PRIZE_TOKEN_CONTRACT`, `SOROBAN_RPC_URL` | Optional       | Backend `/health` only; frontend uses its own `VITE_*` copies for wallet/contract calls |
+| `VITE_*` (e.g. `VITE_ESCROW_CONTRACT_ID`)                       | Optional       | **Public** — inlined into the JS bundle at build time; treat as visible to users        |
 
 Rules:
 
@@ -236,10 +287,10 @@ If you want **hard separation** of env stores (separate dashboards, access contr
 
 ZaoTrak uses **three layers**:
 
-| Layer                          | ID example           | What it stores                                     |
-| ------------------------------ | -------------------- | -------------------------------------------------- |
+| Layer                           | ID example           | What it stores                                     |
+| ------------------------------- | -------------------- | -------------------------------------------------- |
 | **Platform (PostgreSQL + API)** | `comp-173…` (string) | Full competition, submissions, review, leaderboard |
-| **Soroban escrow**             | `0` (u64)            | Prize pool, founder, token, final payouts only     |
+| **Soroban escrow**              | `0` (u64)            | Prize pool, founder, token, final payouts only     |
 
 The **`backend/`** service is PostgreSQL + REST. The frontend calls `VITE_API_URL` (default `http://localhost:3001`). See [`backend/README.md`](backend/README.md).
 
@@ -635,10 +686,10 @@ Heavy automation (device fingerprinting, oracle attestation) is optional later �
 | Area                           | Status                                            |
 | ------------------------------ | ------------------------------------------------- |
 | Founder / participant UI flows | Wired to `backend/` API + wallet                  |
-| Submission review queue        | `PATCH /submissions/:id/review` + live reload       |
+| Submission review queue        | `PATCH /submissions/:id/review` + live reload     |
 | Wallet connect                 | Freighter / SWK on testnet                        |
 | Backend API                    | `backend/` — PostgreSQL + REST                    |
-| Soroban escrow contract        | Deployed testnet; **create** + **finalize** in UI   |
+| Soroban escrow contract        | Deployed testnet; **create** + **finalize** in UI |
 
 ---
 
