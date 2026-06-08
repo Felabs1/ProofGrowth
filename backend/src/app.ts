@@ -6,6 +6,7 @@ import { competitionsRouter } from './routes/competitions.js';
 import { submissionsRouter } from './routes/submissions.js';
 import { participantsRouter } from './routes/participants.js';
 import { leaderboardRouter } from './routes/leaderboard.js';
+import { aiRouter } from './routes/ai.js';
 
 let ready: Promise<void> | null = null;
 
@@ -57,6 +58,7 @@ app.use('/competitions', competitionsRouter);
 app.use('/submissions', submissionsRouter);
 app.use('/participants', participantsRouter);
 app.use('/leaderboard', leaderboardRouter);
+app.use('/ai', aiRouter);
 
 app.use(
   (err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

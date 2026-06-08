@@ -229,3 +229,22 @@ export async function getGlobalLeaderboard(): Promise<GlobalLeaderboardEntry[]> 
   );
   return leaderboard ?? [];
 }
+
+export type SuggestField = 'description' | 'instructions' | 'proofRequirements';
+/** @deprecated Use SuggestField */
+export type JudgingField = SuggestField;
+export type CompetitionGoalType = 'users' | 'volume' | 'leads';
+
+export async function suggestCompetitionField(body: {
+  field: SuggestField;
+  competitionType: CompetitionGoalType;
+  name?: string;
+  description?: string;
+  currentText: string;
+  intent?: string;
+}): Promise<{ suggestion: string; source: 'ai' | 'template' }> {
+  return request('/ai/suggest-competition-field', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}

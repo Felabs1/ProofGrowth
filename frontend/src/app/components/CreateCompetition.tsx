@@ -16,6 +16,7 @@ import {
 } from "../config/stellar";
 import { useWallet } from "../wallet/WalletContext";
 import { StellarWalletsKit } from "../wallet/walletKit";
+import { FieldAssist } from "./FieldAssist";
 
 interface CreateCompetitionProps {
   onNavigate: (page: string, id?: string) => void;
@@ -465,6 +466,16 @@ export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
               onChange={(e) => update("description", e.target.value)}
               style={{ minHeight: 80 }}
             />
+            <FieldAssist
+              field="description"
+              competitionType={form.type}
+              name={form.name}
+              description={form.description}
+              instructions={form.instructions}
+              proofRequirements={form.proofRequirements}
+              value={form.description}
+              onApply={(v) => update("description", v)}
+            />
           </div>
           <div
             style={{
@@ -620,6 +631,16 @@ export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
               onChange={(e) => update("instructions", e.target.value)}
               style={{ minHeight: 100 }}
             />
+            <FieldAssist
+              field="instructions"
+              competitionType={form.type}
+              name={form.name}
+              description={form.description}
+              instructions={form.instructions}
+              proofRequirements={form.proofRequirements}
+              value={form.instructions}
+              onApply={(v) => update("instructions", v)}
+            />
             <p style={hintStyle}>
               Participants submit proof against these rules. You review using your analytics, CRM, or dashboards.
             </p>
@@ -633,6 +654,16 @@ export function CreateCompetition({ onNavigate }: CreateCompetitionProps) {
               value={form.proofRequirements}
               onChange={(e) => update("proofRequirements", e.target.value)}
               style={{ minHeight: 88 }}
+            />
+            <FieldAssist
+              field="proofRequirements"
+              competitionType={form.type}
+              name={form.name}
+              description={form.description}
+              instructions={form.instructions}
+              proofRequirements={form.proofRequirements}
+              value={form.proofRequirements}
+              onApply={(v) => update("proofRequirements", v)}
             />
           </div>
 
