@@ -21,9 +21,10 @@ The platform does **not** claim to automatically verify off-platform outcomes (e
   - [Roles](#roles)
   - [System architecture (target)](#system-architecture-target)
   - [Repository layout](#repository-layout)
-    - [Frontend routes (prototype)](#frontend-routes-prototype)
+    - [Frontend routes](#frontend-routes)
     - [Deploy to Vercel (frontend + API on one domain)](#deploy-to-vercel-frontend--api-on-one-domain)
     - [Environment variables on Vercel](#environment-variables-on-vercel)
+    - [AI writing assistant (Create Competition)](#ai-writing-assistant-create-competition)
   - [Data model](#data-model)
     - [Identifiers](#identifiers)
     - [Frontend types](#frontend-types)
@@ -35,9 +36,8 @@ The platform does **not** claim to automatically verify off-platform outcomes (e
       - [`ReviewTab`](#reviewtab)
       - [Create competition form (`CreateCompetition.tsx`)](#create-competition-form-createcompetitiontsx)
       - [Launch config JSON (`CreateCompetition.tsx` — logged on success, not saved)](#launch-config-json-createcompetitiontsx--logged-on-success-not-saved)
-      - [UI-only state (not in `mockData.ts`)](#ui-only-state-not-in-mockdatats)
-      - [Mock session identities](#mock-session-identities)
-    - [Planned backend API](#planned-backend-api)
+      - [Client-only UI state](#client-only-ui-state)
+    - [Backend API](#backend-api)
       - [`competitions` table / resource](#competitions-table--resource)
       - [`submissions` table / resource](#submissions-table--resource)
       - [`participations` table (optional)](#participations-table-optional)
@@ -97,7 +97,8 @@ The founder sets:
 
 - Title, description, schedule
 - Growth goal (e.g. user acquisition, volume, B2B leads)
-- **Instructions** — what counts, how you will verify
+- **What are you rewarding?** — one-line goal (optional **AI suggestion chips** help draft it)
+- **Instructions** — what counts, how you will verify (AI chips + templates on step 2)
 - **Proof requirements** — e.g. UTM link, analytics export, CRM deal links
 - **Scoring rubric** — points awarded when a submission is approved
 - Winner structure (top N or custom split)
@@ -167,7 +168,7 @@ For goals measurable on Stellar (e.g. payments, contract calls), an on-chain lis
 
 ---
 
-## System architecture (target)
+## System architecture
 
 ```
 +----------------------+
@@ -194,7 +195,7 @@ For goals measurable on Stellar (e.g. payments, contract calls), an on-chain lis
 | Soroban contract     |
 | - Escrow             |
 | - Finalize winners   |
-| - Payout USDC        |
+| - Payout XLM         |
 +----------------------+
 ```
 
@@ -207,21 +208,21 @@ For goals measurable on Stellar (e.g. payments, contract calls), an on-chain lis
 
 | Path                                         | Description                                                              |
 | -------------------------------------------- | ------------------------------------------------------------------------ |
-| `frontend/`                                  | React + Vite UI (API-backed)                                             |
-| `backend/`                                   | Express + PostgreSQL API (submissions, review, leaderboard)              |
+| `frontend/`                                  | React + Vite UI, wallet-signed Soroban txs, AI field assist on `/create` |
+| `backend/`                                   | Express + PostgreSQL API, optional Groq/OpenAI for suggestion endpoint   |
 | `zaotrak_contract/contracts/zaotrak-escrow/` | Soroban escrow: `create_competition`, `finalize_and_distribute`, `claim` |
 
 Source of truth for types: `frontend/src/app/api/types.ts`, `backend/src/db/schema.ts`, `zaotrak_contract/contracts/zaotrak-escrow/src/lib.rs`. See [Data model](#data-model) below.
 
-### Frontend routes (prototype)
+### Frontend routes
 
 | Route               | Audience    | Purpose                                                         |
 | ------------------- | ----------- | --------------------------------------------------------------- |
 | `/`                 | Everyone    | Landing                                                         |
 | `/competitions`     | Everyone    | Browse                                                          |
 | `/competitions/:id` | Everyone    | Detail, join, submit (participant); host banner (founder comps) |
-| `/create`           | Founder     | Launch competition                                              |
-| `/founder`          | Founder     | Dashboard per competition + pending counts                      |
+| `/create`           | Founder     | Launch competition (3-step wizard + AI field suggestions)     |
+| `/founder`          | Founder     | Finalize & pay, cancel & refund, per-competition stats          |
 | `/review`           | Founder     | Submission inbox (`?comp=&tab=pending`)                         |
 | `/dashboard`        | Participant | My competitions & submissions                                   |
 | `/leaderboard`      | Everyone    | Rankings (approved points)                                      |
@@ -243,6 +244,14 @@ docker compose up -d
 npm install
 npm run dev
 # http://localhost:3001/health
+```
+
+Optional — richer AI suggestions on `/create` (falls back to templates without a key):
+
+```bash
+# in backend/.env
+GROQ_API_KEY=gsk_...          # preferred; Groq OpenAI-compatible API
+# or OPENAI_API_KEY=sk-...
 ```
 
 Run escrow contract tests:
@@ -272,6 +281,8 @@ Vercel Services use **one env list per project**, but that does **not** mean eve
 | `DATABASE_URL`                                                  | Yes (required) | **Backend only** — `process.env` in Express; never referenced in `frontend/`            |
 | `ESCROW_CONTRACT_ID`, `PRIZE_TOKEN_CONTRACT`, `SOROBAN_RPC_URL` | Optional       | Backend `/health` only; frontend uses its own `VITE_*` copies for wallet/contract calls |
 | `VITE_*` (e.g. `VITE_ESCROW_CONTRACT_ID`)                       | Optional       | **Public** — inlined into the JS bundle at build time; treat as visible to users        |
+| `GROQ_API_KEY` or `OPENAI_API_KEY`                              | Optional       | **Backend only** — powers Create Competition suggestion chips; never use `VITE_` prefix   |
+| `GROQ_MODEL` / `OPENAI_MODEL`                                   | Optional       | **Backend only** — defaults: `llama-3.3-70b-versatile` / `gpt-4o-mini`                  |
 
 Rules:
 
@@ -280,6 +291,21 @@ Rules:
 - Contract IDs and RPC URLs are already public on-chain; duplicating them as `VITE_*` on the frontend is intentional, not a leak of DB credentials.
 
 If you want **hard separation** of env stores (separate dashboards, access control, or different teams), deploy `frontend/` and `backend/` as **two Vercel projects** and set `VITE_API_URL` to the backend deployment URL. Same-origin `/_/backend` is simpler and safe when you follow the prefix rules above.
+
+### AI writing assistant (Create Competition)
+
+Founders often struggle to write clear **rewarding line**, **instructions**, and **proof checklists**. The `/create` wizard includes adaptive **suggestion chips** under those fields (`FieldAssist` + `frontend/src/app/utils/competitionSuggestions.ts`).
+
+| Field | Step | Behavior |
+| ----- | ---- | -------- |
+| **What are you rewarding?** (`description`) | 1 | Chips adapt to name + length — e.g. *Draft one-liner*, *From competition name*, *Type example* |
+| **Instructions** | 2 | Chips adapt to competition type + how much is written — e.g. *What counts*, *How you verify*, *Expand rules* |
+| **Required proof** | 2 | Type-specific checklist chips — e.g. *Starter checklist*, *UTM / referral*, *CRM screenshot* |
+
+- **Local chips** append vetted snippets instantly (no API call).
+- **AI chips** call `POST /ai/suggest-competition-field` → preview → founder **Use this** or **Dismiss** (nothing auto-submits).
+- **LLM:** `GROQ_API_KEY` (checked first) or `OPENAI_API_KEY`; without either, the backend uses **templates** only.
+- Copy stresses **founder manual review** — no auto-verification language.
 
 ---
 
@@ -338,7 +364,7 @@ Defined in `frontend/src/app/api/types.ts`.
 | `id`                | `string`           | yes      | system           | Unique submission id                 |
 | `competitionId`     | `string`           | yes      | system           | Platform competition id              |
 | `competitionTitle`  | `string`           | yes      | denormalized     | Display copy                         |
-| `participantName`   | `string`           | yes      | participant      | Display name (mock only today)       |
+| `participantName`   | `string`           | yes      | participant      | Display name at join                 |
 | `participantWallet` | `string`           | yes      | participant      | Stellar address for payouts          |
 | `submittedAt`       | `string`           | yes      | system           | ISO-like timestamp string            |
 | `summary`           | `string`           | yes      | participant      | What they did                        |
@@ -349,7 +375,7 @@ Defined in `frontend/src/app/api/types.ts`.
 | `pointsAwarded`     | `number`           | no       | founder          | Set when `approved`                  |
 | `founderNote`       | `string`           | no       | founder          | Feedback on reject / revision        |
 
-**New submission input** (`CompetitionDetail.tsx`, local form — not persisted to API):
+**New submission input** (`CompetitionDetail.tsx` → `POST /competitions/:id/submissions`):
 
 | Field           | Type     | Required |
 | --------------- | -------- | -------- |
@@ -358,7 +384,7 @@ Defined in `frontend/src/app/api/types.ts`.
 | `evidence`      | `string` | yes      |
 | `evidenceUrl`   | `string` | no       |
 
-**Founder review action** (in-memory in `FounderReview.tsx`):
+**Founder review action** (`FounderReview.tsx` → `PATCH /submissions/:id/review`):
 
 | Field           | Type               | When                                             |
 | --------------- | ------------------ | ------------------------------------------------ |
@@ -378,7 +404,7 @@ Defined in `frontend/src/app/api/types.ts`.
 | `startDate`         | `string`                              | `YYYY-MM-DD`                                  |
 | `endDate`           | `string`                              | `YYYY-MM-DD`                                  |
 | `daysLeft`          | `number`                              | Derived display field                         |
-| `participants`      | `number`                              | Count of joined participants (mock)           |
+| `participants`      | `number`                              | Count of joined participants                  |
 | `submissionsTotal`  | `number`                              | All submissions received                      |
 | `pendingReview`     | `number`                              | Submissions awaiting founder                  |
 | `status`            | `'active' \| 'ended' \| 'upcoming'`   | Lifecycle                                     |
@@ -389,7 +415,11 @@ Defined in `frontend/src/app/api/types.ts`.
 | `scoringRules`      | `{ label: string; points: number }[]` | Rubric (guideline, applied at review)         |
 | `leaderboard`       | `LeaderboardEntry[]`                  | See below                                     |
 | `progress`          | `number`                              | 0–100 UI progress bar                         |
-| `founderWallet`     | `string`                              | Host wallet (mock)                            |
+| `founderWallet`     | `string`                              | Host wallet                                   |
+| `onChainId`         | `number` \| null                      | Soroban `competition_id`                      |
+| `createTxHash`      | `string` \| null                      | Escrow create tx                              |
+| `finalizeTxHash`    | `string` \| null                      | Finalize tx                                   |
+| `cancelled`         | `boolean`                             | Refunded / cancelled on-chain                 |
 
 #### `LeaderboardEntry` (nested in `Competition`)
 
@@ -412,7 +442,7 @@ Defined in `frontend/src/app/api/types.ts`.
 | `wins`         | `number` | Competitions won                  |
 | `delta`        | `number` | Recent points change (display)    |
 | `competitions` | `number` | Comps entered                     |
-| `earned`       | `number` | Lifetime USDC earned (mock)       |
+| `earned`       | `number` | Lifetime XLM earned (display)     |
 
 #### `ReviewTab`
 
@@ -445,7 +475,9 @@ Local React state before launch (not the same shape as `Competition`):
 | `prizePool`         | `string`                         | Form input → parsed to number                    |
 | `escrowConfirmed`   | `boolean`                        | UI ack before launch                             |
 
-#### Launch config JSON (`CreateCompetition.tsx` — logged on success, not saved)
+**AI suggestions:** `description`, `instructions`, and `proofRequirements` each render `FieldAssist` chips (see [AI writing assistant](#ai-writing-assistant-create-competition)). Step 2 requires `instructions.trim().length > 20`.
+
+#### Launch config JSON (`CreateCompetition.tsx` — built in memory for API payload)
 
 Built in memory when founder clicks launch:
 
@@ -470,27 +502,18 @@ Built in memory when founder clicks launch:
 }
 ```
 
-#### UI-only state (not in `mockData.ts`)
+#### Client-only UI state
 
-| Location               | State                              | Notes                                 |
-| ---------------------- | ---------------------------------- | ------------------------------------- |
-| `CompetitionDetail`    | `joined: boolean`                  | Join is local only                    |
-| `ParticipantDashboard` | `myScore`, `myRank`, `pendingSubs` | Per-competition overlay on mock comps |
-| `WalletContext`        | `address`, `isConnected`           | Stellar wallet session                |
-
-#### Mock session identities
-
-| Constant                  | Fields                                                 |
-| ------------------------- | ------------------------------------------------------ |
-| `MY_PARTICIPANT`          | `name`, `wallet`, `initials`                           |
-| `MY_FOUNDER`              | `name`, `wallet`, `initials`                           |
-| `FOUNDER_COMPETITION_IDS` | `['comp-1', 'comp-3']` — host-owned comps in prototype |
+| Location            | State                    | Notes                                      |
+| ------------------- | ------------------------ | ------------------------------------------ |
+| `WalletContext`     | `address`, `isConnected` | Stellar Wallets Kit (Freighter, Albedo, …) |
+| `CreateCompetition` | wizard `step`, AI preview | Multi-step form + `FieldAssist` previews  |
 
 ---
 
-### Planned backend API
+### Backend API
 
-Target REST/DB entities aligned with the frontend. Field names should match the platform column unless noted.
+Implemented in `backend/` (PostgreSQL + Express). The frontend uses `VITE_API_URL` locally or `/_/backend` on Vercel. See [`backend/README.md`](backend/README.md) for the full route list.
 
 #### `competitions` table / resource
 
@@ -514,6 +537,10 @@ Target REST/DB entities aligned with the frontend. Field names should match the 
 | `start_at`           | `timestamp`          |                                            |
 | `end_at`             | `timestamp`          |                                            |
 | `status`             | `enum`               | `upcoming`, `active`, `ended`, `cancelled` |
+| `create_tx_hash`     | `string` \| null     | Soroban `create_competition` tx            |
+| `finalize_tx_hash`   | `string` \| null     | Soroban `finalize_and_distribute` tx       |
+| `cancel_tx_hash`     | `string` \| null     | Soroban `cancel_competition` tx            |
+| `finalized_payouts`  | `jsonb`              | `[{ wallet, amount_xlm }]` after finalize  |
 | `created_at`         | `timestamp`          |                                            |
 
 #### `submissions` table / resource
@@ -551,17 +578,26 @@ Target REST/DB entities aligned with the frontend. Field names should match the 
 | `approved_count`     | `int`    |                                        |
 | `rank`               | `int`    | Computed ordering                      |
 
-#### Example API shapes
+#### HTTP routes (summary)
 
 ```http
-POST /competitions
-GET  /competitions/:id
-POST /competitions/:id/join
-POST /competitions/:id/submissions
-GET  /competitions/:id/submissions?status=pending
-PATCH /submissions/:id/review   { status, points_awarded?, founder_note? }
-POST /competitions/:id/finalize   { payouts: [{ wallet, amount_xlm }] }  → triggers Soroban
+GET   /health
+GET   /competitions
+GET   /competitions/:id
+POST  /competitions
+POST  /competitions/:id/join
+POST  /competitions/:id/submissions
+GET   /competitions/:id/submissions
+POST  /competitions/:id/finalize    { founder_wallet, payouts, finalize_tx_hash? }
+POST  /competitions/:id/cancel      { founder_wallet, cancel_tx_hash? }
+GET   /submissions?founderWallet=&tab=
+PATCH /submissions/:id/review
+GET   /participants/:wallet/submissions
+GET   /leaderboard/global
+POST  /ai/suggest-competition-field { field, competitionType, currentText, intent?, name?, description? }
 ```
+
+Join and submit are rejected outside the competition date window (`backend/src/services/schedule.ts`). On-chain escrow is wallet-signed from the **frontend**; the API stores metadata, review state, and tx hashes.
 
 ---
 
@@ -630,7 +666,7 @@ More detail: [`zaotrak_contract/README.md`](zaotrak_contract/README.md).
 
 ### Cross-layer mapping
 
-| Platform / UI                           | Planned API                | On-chain contract                 |
+| Platform / UI                           | Backend API                | On-chain contract                 |
 | --------------------------------------- | -------------------------- | --------------------------------- |
 | `Competition.title`                     | `title`                    | `title`                           |
 | `Competition.prizePool`                 | `prize_pool`               | `prize_pool` (convert to stroops) |
@@ -654,7 +690,7 @@ More detail: [`zaotrak_contract/README.md`](zaotrak_contract/README.md).
 
 ### Competition engine
 
-Rules, schedule, instructions, proof requirements, rubric, winner splits.
+Rules, schedule, instructions, proof requirements, rubric, winner splits. Create flow includes adaptive AI/template suggestions for founder-facing copy.
 
 ### Submission workflow
 
@@ -683,13 +719,18 @@ Heavy automation (device fingerprinting, oracle attestation) is optional later �
 
 ## Current status
 
-| Area                           | Status                                            |
-| ------------------------------ | ------------------------------------------------- |
-| Founder / participant UI flows | Wired to `backend/` API + wallet                  |
-| Submission review queue        | `PATCH /submissions/:id/review` + live reload     |
-| Wallet connect                 | Freighter / SWK on testnet                        |
-| Backend API                    | `backend/` — PostgreSQL + REST                    |
-| Soroban escrow contract        | Deployed testnet; **create** + **finalize** in UI |
+| Area                           | Status                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| Founder / participant UI       | API-backed; no mock seed data                                          |
+| Create competition             | 3-step wizard; on-chain `create_competition` + **AI field suggestions** |
+| Founder dashboard              | Finalize & pay (`finalize_and_distribute`), cancel & refund            |
+| Competition detail             | Join/submit, on-chain escrow panel (`get_competition` / `escrow_balance`) |
+| Submission review              | `PATCH /submissions/:id/review`; date-gated join/submit                |
+| Wallet                         | Stellar Wallets Kit (Freighter, Albedo, …) on testnet                  |
+| Backend API                    | PostgreSQL + REST; optional Groq/OpenAI for `/ai/suggest-competition-field` |
+| Deploy                         | Vercel Services — UI `/`, API `/_/backend` (root `vercel.json`)        |
+| Soroban escrow                 | Testnet deploy; create + finalize in UI; `claim` path not in UI yet   |
+| Not built yet                  | Wallet-signed API auth, file uploads, automated calendar → `ended`     |
 
 ---
 

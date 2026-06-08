@@ -47,6 +47,10 @@ npm run db:clear
 |----------|---------|-------------|
 | `DATABASE_URL` | _(required)_ | e.g. `postgresql://zaotrak:zaotrak@localhost:5432/zaotrak` |
 | `PORT` | `3001` | HTTP port |
+| `GROQ_API_KEY` | — | Optional; Groq LLM for `/ai/suggest-competition-field` (checked before OpenAI) |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model slug |
+| `OPENAI_API_KEY` | — | Optional; OpenAI fallback for suggestions |
+| `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model |
 
 ## API
 
@@ -64,7 +68,9 @@ npm run db:clear
 | GET | `/participants/:wallet/submissions` | Participant dashboard |
 | GET | `/participants/:wallet/competitions` | Joined competition ids |
 | GET | `/leaderboard/global` | Global rankings |
-| POST | `/competitions/:id/finalize` | `{ founder_wallet, payouts }` — marks ended after on-chain payout |
+| POST | `/competitions/:id/finalize` | `{ founder_wallet, payouts, finalize_tx_hash? }` — marks ended after on-chain payout |
+| POST | `/competitions/:id/cancel` | `{ founder_wallet, cancel_tx_hash? }` — marks cancelled after on-chain refund |
+| POST | `/ai/suggest-competition-field` | AI/template suggestions for Create Competition copy (optional `GROQ_API_KEY` or `OPENAI_API_KEY`) |
 
 ## Wiring the frontend
 
