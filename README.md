@@ -19,7 +19,7 @@ The platform does **not** claim to automatically verify off-platform outcomes (e
     - [5. Escrow and payout (on-chain)](#5-escrow-and-payout-on-chain)
     - [6. Optional future: automated tracking](#6-optional-future-automated-tracking)
   - [Roles](#roles)
-  - [System architecture (target)](#system-architecture-target)
+  - [System architecture](#system-architecture)
   - [Repository layout](#repository-layout)
     - [Frontend routes](#frontend-routes)
     - [Deploy to Vercel (frontend + API on one domain)](#deploy-to-vercel-frontend--api-on-one-domain)
@@ -35,14 +35,14 @@ The platform does **not** claim to automatically verify off-platform outcomes (e
       - [`Participant` (global leaderboard)](#participant-global-leaderboard)
       - [`ReviewTab`](#reviewtab)
       - [Create competition form (`CreateCompetition.tsx`)](#create-competition-form-createcompetitiontsx)
-      - [Launch config JSON (`CreateCompetition.tsx` — logged on success, not saved)](#launch-config-json-createcompetitiontsx--logged-on-success-not-saved)
+      - [Launch config JSON (`CreateCompetition.tsx` — built in memory for API payload)](#launch-config-json-createcompetitiontsx--built-in-memory-for-api-payload)
       - [Client-only UI state](#client-only-ui-state)
     - [Backend API](#backend-api)
       - [`competitions` table / resource](#competitions-table--resource)
       - [`submissions` table / resource](#submissions-table--resource)
       - [`participations` table (optional)](#participations-table-optional)
       - [`leaderboard_entries` (derived or materialized)](#leaderboard_entries-derived-or-materialized)
-      - [Example API shapes](#example-api-shapes)
+      - [HTTP routes (summary)](#http-routes-summary)
     - [On-chain (`zaotrak-escrow`)](#on-chain-zaotrak-escrow)
       - [`Competition` (contract storage)](#competition-contract-storage)
       - [`Payout` (finalize input + storage)](#payout-finalize-input--storage)
@@ -58,6 +58,7 @@ The platform does **not** claim to automatically verify off-platform outcomes (e
   - [Trust and fraud (pragmatic)](#trust-and-fraud-pragmatic)
   - [Current status](#current-status)
   - [Vision](#vision)
+  - [Contributors](#contributors)
 
 ## Problem
 
@@ -221,7 +222,7 @@ Source of truth for types: `frontend/src/app/api/types.ts`, `backend/src/db/sche
 | `/`                 | Everyone    | Landing                                                         |
 | `/competitions`     | Everyone    | Browse                                                          |
 | `/competitions/:id` | Everyone    | Detail, join, submit (participant); host banner (founder comps) |
-| `/create`           | Founder     | Launch competition (3-step wizard + AI field suggestions)     |
+| `/create`           | Founder     | Launch competition (3-step wizard + AI field suggestions)       |
 | `/founder`          | Founder     | Finalize & pay, cancel & refund, per-competition stats          |
 | `/review`           | Founder     | Submission inbox (`?comp=&tab=pending`)                         |
 | `/dashboard`        | Participant | My competitions & submissions                                   |
@@ -281,7 +282,7 @@ Vercel Services use **one env list per project**, but that does **not** mean eve
 | `DATABASE_URL`                                                  | Yes (required) | **Backend only** — `process.env` in Express; never referenced in `frontend/`            |
 | `ESCROW_CONTRACT_ID`, `PRIZE_TOKEN_CONTRACT`, `SOROBAN_RPC_URL` | Optional       | Backend `/health` only; frontend uses its own `VITE_*` copies for wallet/contract calls |
 | `VITE_*` (e.g. `VITE_ESCROW_CONTRACT_ID`)                       | Optional       | **Public** — inlined into the JS bundle at build time; treat as visible to users        |
-| `GROQ_API_KEY` or `OPENAI_API_KEY`                              | Optional       | **Backend only** — powers Create Competition suggestion chips; never use `VITE_` prefix   |
+| `GROQ_API_KEY` or `OPENAI_API_KEY`                              | Optional       | **Backend only** — powers Create Competition suggestion chips; never use `VITE_` prefix |
 | `GROQ_MODEL` / `OPENAI_MODEL`                                   | Optional       | **Backend only** — defaults: `llama-3.3-70b-versatile` / `gpt-4o-mini`                  |
 
 Rules:
@@ -296,11 +297,11 @@ If you want **hard separation** of env stores (separate dashboards, access contr
 
 Founders often struggle to write clear **rewarding line**, **instructions**, and **proof checklists**. The `/create` wizard includes adaptive **suggestion chips** under those fields (`FieldAssist` + `frontend/src/app/utils/competitionSuggestions.ts`).
 
-| Field | Step | Behavior |
-| ----- | ---- | -------- |
-| **What are you rewarding?** (`description`) | 1 | Chips adapt to name + length — e.g. *Draft one-liner*, *From competition name*, *Type example* |
-| **Instructions** | 2 | Chips adapt to competition type + how much is written — e.g. *What counts*, *How you verify*, *Expand rules* |
-| **Required proof** | 2 | Type-specific checklist chips — e.g. *Starter checklist*, *UTM / referral*, *CRM screenshot* |
+| Field                                       | Step | Behavior                                                                                                     |
+| ------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------ |
+| **What are you rewarding?** (`description`) | 1    | Chips adapt to name + length — e.g. _Draft one-liner_, _From competition name_, _Type example_               |
+| **Instructions**                            | 2    | Chips adapt to competition type + how much is written — e.g. _What counts_, _How you verify_, _Expand rules_ |
+| **Required proof**                          | 2    | Type-specific checklist chips — e.g. _Starter checklist_, _UTM / referral_, _CRM screenshot_                 |
 
 - **Local chips** append vetted snippets instantly (no API call).
 - **AI chips** call `POST /ai/suggest-competition-field` → preview → founder **Use this** or **Dismiss** (nothing auto-submits).
@@ -504,10 +505,10 @@ Built in memory when founder clicks launch:
 
 #### Client-only UI state
 
-| Location            | State                    | Notes                                      |
-| ------------------- | ------------------------ | ------------------------------------------ |
-| `WalletContext`     | `address`, `isConnected` | Stellar Wallets Kit (Freighter, Albedo, …) |
-| `CreateCompetition` | wizard `step`, AI preview | Multi-step form + `FieldAssist` previews  |
+| Location            | State                     | Notes                                      |
+| ------------------- | ------------------------- | ------------------------------------------ |
+| `WalletContext`     | `address`, `isConnected`  | Stellar Wallets Kit (Freighter, Albedo, …) |
+| `CreateCompetition` | wizard `step`, AI preview | Multi-step form + `FieldAssist` previews   |
 
 ---
 
@@ -719,21 +720,25 @@ Heavy automation (device fingerprinting, oracle attestation) is optional later �
 
 ## Current status
 
-| Area                           | Status                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| Founder / participant UI       | API-backed; no mock seed data                                          |
-| Create competition             | 3-step wizard; on-chain `create_competition` + **AI field suggestions** |
-| Founder dashboard              | Finalize & pay (`finalize_and_distribute`), cancel & refund            |
-| Competition detail             | Join/submit, on-chain escrow panel (`get_competition` / `escrow_balance`) |
-| Submission review              | `PATCH /submissions/:id/review`; date-gated join/submit                |
-| Wallet                         | Stellar Wallets Kit (Freighter, Albedo, …) on testnet                  |
-| Backend API                    | PostgreSQL + REST; optional Groq/OpenAI for `/ai/suggest-competition-field` |
-| Deploy                         | Vercel Services — UI `/`, API `/_/backend` (root `vercel.json`)        |
-| Soroban escrow                 | Testnet deploy; create + finalize in UI; `claim` path not in UI yet   |
-| Not built yet                  | Wallet-signed API auth, file uploads, automated calendar → `ended`     |
+| Area                     | Status                                                                      |
+| ------------------------ | --------------------------------------------------------------------------- |
+| Founder / participant UI | API-backed; no mock seed data                                               |
+| Create competition       | 3-step wizard; on-chain `create_competition` + **AI field suggestions**     |
+| Founder dashboard        | Finalize & pay (`finalize_and_distribute`), cancel & refund                 |
+| Competition detail       | Join/submit, on-chain escrow panel (`get_competition` / `escrow_balance`)   |
+| Submission review        | `PATCH /submissions/:id/review`; date-gated join/submit                     |
+| Wallet                   | Stellar Wallets Kit (Freighter, Albedo, …) on testnet                       |
+| Backend API              | PostgreSQL + REST; optional Groq/OpenAI for `/ai/suggest-competition-field` |
+| Deploy                   | Vercel Services — UI `/`, API `/_/backend` (root `vercel.json`)             |
+| Soroban escrow           | Testnet deploy; create + finalize in UI; `claim` path not in UI yet         |
+| Not built yet            | Wallet-signed API auth, file uploads, automated calendar → `ended`          |
 
 ---
 
 ## Vision
 
 ZaoTrak turns growth into a **market**: founders fund prizes, operators compete with proof, and winners get paid from escrow. Verification lives where it already does — **the founder’s product and analytics** — while the platform makes competitions fair, structured, and on-chain where it matters (money).
+
+## Contributors
+
+Felix Awere
